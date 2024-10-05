@@ -49,16 +49,21 @@ class oneBook:
         self.rawText :list[str]= []
         self.GroupBy:tuple[str]= ()
         self.BookTree:list[tuple[str,list[tuple[str,list[str]]]]] = []
+        self.quickGB:list[str] = ["!Count100","VOL::","^第[零一二三四五六七八九十百千万0123456789 ]+卷"]
+        self.quickSB:list[str] = ["^(:?番外|第[零一二三四五六七八九十百千万0123456789 ]+章)","^===.*==="]
     def openText(self,path:str) -> bool:
         if not os.path.exists(path):
             return False
         with open(path,'r',encoding='utf-8') as f:
             self.rawText = f.readlines()
         return True
-    def regGroupBy(self,Groupby:str) -> bool:
+    def regGroupBy(self,Groupby:str,_DEFAULT = "!Count100") -> bool:
         if not Groupby:
-            self.GroupBy = ('num',100)
-            return True
+            Groupby = _DEFAULT
+        try:
+            Groupby = self.quickGB[int(Groupby)]
+        except:
+            pass
         if Groupby.startswith("!Count"):
             try:
                 sectionSplit = int(Groupby[6:])
@@ -78,9 +83,13 @@ class oneBook:
             return True
         except:
             return False
-    def regSection(self,Sect:str) -> bool:
+    def regSection(self,Sect:str,_DEFAULT = r"^(:?番外|第[零一二三四五六七八九十百千万0123456789 ]+章)") -> bool:
         if not Sect:
-            Sect = r"^(:?番外|第.+章)"
+            Sect = _DEFAULT
+        try:
+            Sect = self.quickSB[int(Sect)]
+        except:
+            pass
         _PattSec =  re.compile(Sect)
         match self.GroupBy[0]:
             case "num":
@@ -216,14 +225,14 @@ class oneBook:
             print(">>>       YOU ARE RUNNING oneBook NOW       <<<\n\n\n",
                  f" Find File `{path               :^25}`,...Done.\n",
                   " Confirm the text file,...                Done.")
-            while not self.regGroupBy( input(">Group By your Section, default is `!Count100`\n").strip()):
+            while not self.regGroupBy( input(">Group By your Section, {}\n".format('\n'.join([":: "+str(_[0]) + " is `{}`".format(_[1]) for _ in zip(range(len(self.quickGB)),self.quickGB) ]))).strip()):
                 print("Parmer ERROR, please re input")
             os.system("cls")
             print(">>>       YOU ARE RUNNING oneBook NOW       <<<\n\n\n",
                  f" Find File `{path               :^25}`,...Done.\n",
                   " Confirm the text file,...                Done.\n",
                   " Set `GroupBy`,...                        Done.")
-            while not self.regSection( input(">Set your Section, default is `^(:?番外|第.+章)`\n").strip()):
+            while not self.regSection( input(">Set your Section, {}\n".format('\n'.join([ ":: "+str(_[0])+ " is `{}`".format(_[1]) for _ in zip(range(len(self.quickSB)),self.quickSB) ]))).strip()):
                 print("Parmer ERROR, please re input")
             os.system("cls")
             print(">>>       YOU ARE RUNNING oneBook NOW       <<<\n\n\n",
