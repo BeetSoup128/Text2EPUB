@@ -58,7 +58,6 @@ class resources:
         restmp = ['<?xml version=\'1.0\' encoding=\'utf-8\'?>\n<!DOCTYPE html>\n<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" epub:prefix="z3998: http://www.daisy.org/z3998/2012/vocab/structure/#" lang="cn" xml:lang="cn">\n',
             '<head>\n',
            f'  <title>{title.strip()}</title>\n',
-            #'  <link rel="stylesheet" href="style.css" type="text/css"/>\n',
             '</head>\n',
             '<body>\n',
             '  <div>\n'
@@ -69,7 +68,7 @@ class resources:
         # Build EpubH5Page
         _EH = epub.EpubHtml(
             f"U{uid:06d}.xhtml", 
-            f"XHTMLS/C{cid:03d}S{sid:06d}.xhtml",
+            f"C{cid:03d}S{sid:06d}.xhtml",
             "application/xhtml+xml",
             _res,
             title.strip(),'zh-CN'
