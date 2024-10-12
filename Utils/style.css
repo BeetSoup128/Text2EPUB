@@ -1,0 +1,88 @@
+
+@page { 
+    margin-top: 0px;
+    margin-bottom: 0px;
+}
+
+body { 
+    font-family: "beetsoup_gntfts";
+    padding: 0;
+    margin-left: 0px;
+    margin-right: 0px;
+    orphans: 0;
+    widows: 0;
+}
+
+p { 
+    font-family: "beetsoup_gntfts";
+    font-size: 26px;
+    line-height: 150%;
+    text-indent: 2em;
+    margin-top: 1.5em;
+    margin-bottom: 0;
+    margin-left: 0;
+    margin-right: 0;
+    orphans: 0;
+    widows: 0;
+}
+
+.a { 
+    text-indent: 0em;
+}
+
+div.centeredimage {
+    text-align:center;
+    display:block;
+    margin-top: 0.5em;
+    margin-bottom: 0.5em;
+}
+
+img.attpic {
+    border: 1px solid ;
+    max-width: 100%;
+    margin: 0;
+}
+
+.booktitle {
+    margin-top: 30%;
+    margin-bottom: 0;
+    border-style: none solid none none;
+    border-width: 50px;
+
+    font-size: 3em;
+    line-height: 120%;
+    text-align: right;
+}
+
+.bookauthor {
+    margin-top: 0;
+    border-style: none solid none none;
+    border-width: 50px;
+
+    page-break-after: always;
+    font-size: large;
+    line-height: 120%;
+    text-align: right;
+}
+
+.titletoc, .titlel1top, .titlel1std,.titlel2top, .titlel2std,.titlel3top, .titlel3std,.titlel4std {
+    margin-top: 0;
+    border-style: none double none solid;
+    border-width: 0px 5px 0px 20px;
+
+    padding: 45px 5px 5px 5px;
+    font-size: x-large;
+    line-height: 115%;
+    text-align: justify;
+}
+
+.titlel1single,.titlel2single,.titlel3single {
+    margin-top: 35%;
+    border-style: none solid none none;
+    border-width: 30px;
+
+    padding: 30px 5px 5px 5px;
+    font-size: x-large;
+    line-height: 125%;
+    text-align: right;
+}

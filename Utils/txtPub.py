@@ -1,56 +1,99 @@
 import re,os,uuid,bs4,zhconv,subprocess,typing
 from ebooklib import epub
+from tqdm import trange
 
-def epubXML_format(iStr:str,level:int=0) -> str:
-    if level < 1:
-        pbs4 = bs4.BeautifulSoup(iStr,"html.parser")
-        for _ in pbs4.select("*"):
-            if 'style' in _.attrs:
-                del _['style']
-        for _ in pbs4.select("script"):
-            _.extract()
-        iStr = pbs4.prettify()
-    if level < 2 :
-        iStr = zhconv.convert(iStr, "zh-hans")\
-            .replace('“', '「')\
-            .replace('”', '」')\
-            .replace('‘', '『')\
-            .replace('’', '』')\
-            .replace("&nbsp;", '')\
-            .replace('\\n', '')
-    if level < 3:
-        iStr = iStr.replace("&", "&amp;")\
-            .replace("<", "&lt;")\
-            .replace(">", "&gt;")\
-            .replace('"', "&quot;")\
-            .replace('\'', "&#x27;")\
-            .replace(' ',"&nbsp;")
-    return re.sub(u"[\\x00-\\x08\\x0b\\x0e-\\x1f\\x7f]", '',iStr).strip()
 
-class PageGenerator:
-    def __init__(self,title:str,pages:str|list[str],spliter:typing.Literal["CR","LF","CRLF"]="CRLF"):
-        titleF  = epubXML_format(title.strip(),1)
+class resources:
+    
+    def __init__(self) -> None:
+        self.init_ttf()
+        self.init_css()
+    def init_ttf(self) -> None:
+        resls:list[str] = ["LXGWWenKaiGB-Light.ttf","LXGWWenKaiGB-Medium.ttf","LXGWWenKaiGB-Regular.ttf"]
+        self.ttf:list[tuple[str,bytes]] = []
+        for ttfn in resls:
+            with open(f"./Utils/{ttfn}",'rb') as f:
+                self.ttf.append((ttfn,f.read(),))
+    def init_css(self) -> None:
+        pf="@font-face {\n    font-family: \"beetsoup_gntfts\";\n    src:{\n"
+        for ttfname,_ in self.ttf:
+            pf += f"        url(\"./{ttfname}\"),\n"
+        pf = pf[:-2]+';\n    }\n}\n'
+        with open(f"./Utils/style.css",'r',encoding='utf-8') as f:
+            cssf = f.read()
+        self.css = pf+cssf
+    
+    def epubXML_format(self,iStr:str,level:int=0) -> str:
+        if level < 1:
+            pbs4 = bs4.BeautifulSoup(iStr,"html.parser")
+            for _ in pbs4.select("*"):
+                if 'style' in _.attrs:
+                    del _['style']
+            for _ in pbs4.select("script"):
+                _.extract()
+            iStr = pbs4.prettify()
+        if level < 2 :
+            iStr = zhconv.convert(iStr, "zh-hans")\
+                .replace('“', '「')\
+                .replace('”', '」')\
+                .replace('‘', '『')\
+                .replace('’', '』')\
+                .replace("&nbsp;", '')\
+                .replace('\\n', '')
+        if level < 3:
+            iStr = iStr.replace("&", "&amp;")\
+                .replace("<", "&lt;")\
+                .replace(">", "&gt;")\
+                .replace('"', "&quot;")\
+                .replace('\'', "&#x27;")\
+                .replace(' ',"&nbsp;")
+        return re.sub(u"[\\x00-\\x08\\x0b\\x0e-\\x1f\\x7f]", '',iStr).strip()
+
+    def PageGenerator(self,cid:int,sid:int,uid:int,title:str,pages:str|list[str],spliter:typing.Literal["CR","LF","CRLF"]="CRLF"):
+        titleF  = self.epubXML_format(title.strip(),1)
         if isinstance(pages,str):
-            self.pls = pages.split(spliter.replace("CR",'\r').replace("LF",'\n'))
+            _pls = pages.split(spliter.replace("CR",'\r').replace("LF",'\n'))
         elif isinstance(pages,list):
-            self.pls = pages
-        restmp = ['<?xml version="1.0" encoding="utf-8"?>\n<!DOCTYPE html>\n\n<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">\n<head>\n',
-         f'  <title>{title.strip()}</title>\n',
-         f'</head>\n\n<body>\n\n<div>\n<h3>{titleF}</h3>\n\n'
-         ]+ [ '' if len(frame.strip())==0 else f"<p>{epubXML_format(frame.strip(),1)}</p><br/>\n\n" for frame in self.pls
-             ] +['\n</div>\n\n\n</body>\n</html>']
-        self.res = ''.join(restmp)
-    def __call__(self) -> str:
-        return bs4.BeautifulSoup(self.res,"html.parser").prettify(encoding='utf-8')
+            _pls = pages
+        restmp = ['<?xml version=\'1.0\' encoding=\'utf-8\'?>\n<!DOCTYPE html>\n<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" epub:prefix="z3998: http://www.daisy.org/z3998/2012/vocab/structure/#" lang="cn" xml:lang="cn">\n',
+            '<head>\n',
+           f'  <title>{title.strip()}</title>\n',
+            #'  <link rel="stylesheet" href="style.css" type="text/css"/>\n',
+            '</head>\n',
+            '<body>\n',
+            '  <div>\n'
+           f'    <h3>{titleF}</h3>\n\n',
+            *[ '' if len(frame.strip())==0 else f"    <p>{self.epubXML_format(frame.strip(),1)}</p>\n\n    <br/>\n\n" for frame in _pls],
+            '  </div>\n</body>\n</html>']
+        _res = (''.join(restmp)).encode("utf-8")
+        # Build EpubH5Page
+        _EH = epub.EpubHtml(
+            f"U{uid:06d}.xhtml", 
+            f"XHTMLS/C{cid:03d}S{sid:06d}.xhtml",
+            "application/xhtml+xml",
+            _res,
+            title.strip(),'zh-CN'
+        )
+        _EH.add_link(rel="stylesheet", href="../style.css", type="text/css")
+        return _EH
+        
+gb_res = resources()
 
 class oneBook:
-    def __init__(self) -> None:
+    global gb_res
+    def __init__(self,path:str,inner_style:bool=False) -> None:
         self.dbg = False
         self.rawText :list[str]= []
         self.GroupBy:tuple[str]= ()
         self.BookTree:list[tuple[str,list[tuple[str,list[str]]]]] = []
         self.quickGB:list[str] = ["!Count100","VOL::","^第[零一二三四五六七八九十百千万0123456789 ]+卷"]
         self.quickSB:list[str] = ["^(:?番外|第[零一二三四五六七八九十百千万0123456789 ]+章)","^===.*==="]
+        self.iStyle = inner_style
+        self.ttf=gb_res.ttf
+
+        self.__call__(path)
+        
+
     def openText(self,path:str) -> bool:
         if not os.path.exists(path):
             return False
@@ -176,26 +219,31 @@ class oneBook:
         bk.set_identifier(str(uid if uid is not None else uuid.uuid1()))
         bk.add_author(author)
         bk.add_metadata("DC", "description", brief )
+        if self.iStyle:
+            for fontid,(font,data) in enumerate(self.ttf):
+                bk.add_item(epub.EpubItem(f"F{fontid:06d}.ttf",f"{font}","font/ttf",data))        
+        bk.add_item(epub.EpubItem("style.css","style.css","text/css",gb_res.css))
         spine_tmp = ["nav"]
-        cid = 1
-        uid = 1
-        SectionBuild:list[list[epub.EpubHtml]] = []
-        ChapterBuild:list[tuple[epub.Link,list[epub.EpubHtml]]] = []
-        for ChapterName, innerLS in self.BookTree:
-            sid = 1
-            SectionBuild.append([])
-            for SectionName, PageLsStr in innerLS:
-                _pagenow = epub.EpubHtml(f"U{uid:06d}.xhtml", f"C{cid:03d}S{sid:06d}.xhtml",'',PageGenerator(SectionName,PageLsStr)(),SectionName.strip(),'cn')
-                bk.add_item(_pagenow)
-                spine_tmp.append(_pagenow)
-                SectionBuild[-1].append(_pagenow)
-                sid += 1
-                uid += 1
-            CPFH = SectionBuild[-1][0]
-            ChapterBuild.append((epub.Link(CPFH.file_name,ChapterName,f"Chap{cid:03d}"),SectionBuild[-1],))
-            cid += 1
-        print(f"Total Chap{cid:03d}, Page{uid:06d}")
-        #bk.toc = ((epub.Section(self._name),tuple(ChapterBuild),),)
+        SectionCount = sum([ len(ils[1])  for ils in self.BookTree ])
+        with trange(1,SectionCount+1) as TBAR:
+            UT = iter(TBAR)
+            SectionBuild:list[list[epub.EpubHtml]] = []
+            ChapterBuild:list[tuple[epub.Link,list[epub.EpubHtml]]] = []
+            for cid,(ChapterName, innerLS) in enumerate(self.BookTree,1):
+
+                SectionBuild.append([])
+                for sid,(SectionName, PageLsStr) in enumerate(innerLS,1):
+                    TBAR.set_description_str(f"C{cid:03d}S{sid:06d}")
+                    _pagenow = gb_res.PageGenerator(
+                        cid,sid,next(UT),SectionName,PageLsStr
+                    )
+                    bk.add_item(_pagenow)
+                    spine_tmp.append(_pagenow)
+                    SectionBuild[-1].append(_pagenow)
+                ChapterBuild.append((epub.Link("javascript:void(0)",ChapterName,f"Chap{cid:03d}"),SectionBuild[-1],))
+            
+        print(f"Total Chap{cid:03d}, SecPage{SectionCount:06d}")
+
         bk.toc = ChapterBuild
         bk.add_item(epub.EpubNcx())
         bk.add_item(epub.EpubNav())
@@ -253,6 +301,7 @@ class oneBook:
         _NP3.kill()
 
 if __name__ =='__main__':
+    print("Now running")
     l = os.listdir()
     for f in l:
         if f.endswith('.txt'):
@@ -262,4 +311,5 @@ if __name__ =='__main__':
             )):
                 continue
             if f[:-4]+'.ePub' not in l:
-                oneBook()(f)
+                oneBook(f,True)
+    print("Now ending")
