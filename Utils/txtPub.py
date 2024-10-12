@@ -9,7 +9,7 @@ class resources:
         self.init_ttf()
         self.init_css()
     def init_ttf(self) -> None:
-        resls:list[str] = ["LXGWWenKaiGB-Light.ttf","LXGWWenKaiGB-Medium.ttf","LXGWWenKaiGB-Regular.ttf"]
+        resls:typing.Iterable[str] = filter(lambda x:x.endswith("ttf"),os.listdir())
         self.ttf:list[tuple[str,bytes]] = []
         for ttfn in resls:
             with open(f"./Utils/{ttfn}",'rb') as f:
