@@ -2,33 +2,50 @@ import re,os,uuid,bs4,zhconv,subprocess,typing
 from ebooklib import epub
 from tqdm import trange
 
+class Style:
+    def __init__(self,txtpath:str,ttf:str,b:bytes,csst:str,us:bool,zs:bool) -> None:
+        self.ttf = (ttf,b,)
+        self.conf = (us,zs,)
+        if us :
+            self.css = ("@font-face {\n    font-family: \"beetsoup_gntfts\";\n    src:\n", ";\n    \n}\n"+ csst,)
+            if zs :
+                self.ctx = subprocess.Popen(f"pyftsubset ./Utils/{ttf} --text-file={txtpath} --flavor=woff2 --output-file=./tmp.woff2")
+        else :
+            self.css = ("",csst,)
+    def _get_css(self) -> str:
+        if self.conf[1]:
+            self.ctx.wait()
+            return self.css[0] + f"url(\"./{self.ttf[0][:-4]}.woff2\")  format(\"woff2\") , local(\"{self.ttf[0]}\")" + self.css[1]
+        return self.css[0] + f"url(\"{self.ttf[0]}\"),local(\"{self.ttf[0]}\")" + self.css[1]
+    def get_css(self) -> bytes:
+        return self._get_css().encode()
+    def get_ttf(self) -> tuple[str,bytes] :
+        if self.conf[1]:
+            self.ctx.wait()
+            with open(f"./tmp.woff2",'rb') as f:
+                _ret=(self.ttf[0][:-4]+".woff2",f.read(),)
+            os.remove("./tmp.woff2")
+            return _ret
+        return self.ttf
+    def use_ttf(self) -> bool:
+        return self.conf[0]
 
-class resources:
-    
-    
+class WorkSpace:
     def __init__(self) -> None:
-        self.Local_Fonts:list[str] = [
-            "LXGW WenKai GB"
-        ]
-        self.init_ttf()
-        self.init_css()
-    def init_ttf(self) -> None:
-        resls:typing.Iterable[str] = filter(lambda x:x.endswith("ttf"),os.listdir())
-        self.ttf:list[tuple[str,bytes]] = []
-        for ttfn in resls:
-            with open(f"./Utils/{ttfn}",'rb') as f:
-                self.ttf.append((ttfn,f.read(),))
-    def init_css(self) -> None:
-        pf="@font-face {\n    font-family: \"beetsoup_gntfts\";\n    src:{\n"
-        for ttfname,_ in self.ttf:
-            pf += f"        url(\"./{ttfname}\"),\n"
-        for localf in self.Local_Fonts:
-            pf += f"        local(\"{localf}B\");\n"+'    }\n}\n'
+        self.Local_Font:str = "LXGW WenKai GB"
         with open(f"./Utils/style.css",'r',encoding='utf-8') as f:
-            cssf = f.read()
-        self.css = pf+cssf
-    
-    def epubXML_format(self,iStr:str,level:int=0) -> str:
+            self.css = f.read()
+        self.init_ttf()
+    def init_ttf(self) -> None:
+        self.ttf:tuple[str,bytes] =()
+        for ttfn in filter(lambda x:x.endswith("ttf"),os.listdir("Utils")):
+            with open(f"./Utils/{ttfn}",'rb') as f:
+                self.ttf=(ttfn,f.read(),)
+                return
+    def style(self,path:str,using_style:bool,zip_style:bool) -> Style:
+        return Style(path,self.ttf[0],self.ttf[1],self.css,using_style,zip_style)
+    @staticmethod
+    def FmtStrXhtml(iStr:str,level:int=1) -> str:
         if level < 1:
             pbs4 = bs4.BeautifulSoup(iStr,"html.parser")
             for _ in pbs4.select("*"):
@@ -53,9 +70,9 @@ class resources:
                 .replace('\'', "&#x27;")\
                 .replace(' ',"&nbsp;")
         return re.sub(u"[\\x00-\\x08\\x0b\\x0e-\\x1f\\x7f]", '',iStr).strip()
-
-    def PageGenerator(self,cid:int,sid:int,uid:int,title:str,pages:str|list[str],spliter:typing.Literal["CR","LF","CRLF"]="CRLF"):
-        titleF  = self.epubXML_format(title.strip(),1)
+    @staticmethod
+    def GenEpubPage(cid:int,sid:int,uid:int,title:str,pages:str|list[str],spliter:typing.Literal["CR","LF","CRLF"]="CRLF"):
+        titleF  = WorkSpace.FmtStrXhtml(title)
         if isinstance(pages,str):
             _pls = pages.split(spliter.replace("CR",'\r').replace("LF",'\n'))
         elif isinstance(pages,list):
@@ -67,7 +84,7 @@ class resources:
             '<body>\n',
             '  <div>\n'
            f'    <h3>{titleF}</h3>\n\n',
-            *[ '' if len(frame.strip())==0 else f"    <p>{self.epubXML_format(frame.strip(),1)}</p>\n\n    <br/>\n\n" for frame in _pls],
+            *[ '' if len(frame.strip())==0 else f"    <p>{WorkSpace.FmtStrXhtml(frame)}</p>\n\n    <br/>\n\n" for frame in _pls],
             '  </div>\n</body>\n</html>']
         _res = (''.join(restmp)).encode("utf-8")
         # Build EpubH5Page
@@ -78,31 +95,55 @@ class resources:
             _res,
             title.strip(),'zh-CN'
         )
-        _EH.add_link(rel="stylesheet", href="../style.css", type="text/css")
+        _EH.add_link(rel="stylesheet", href="./style.css", type="text/css")
         return _EH
-        
-gb_res = resources()
+    @staticmethod
+    def __call__():
+        print("Now running")
+        l = os.listdir()
+        for f in l:
+            if f.endswith('.txt'):
+                if f.startswith((
+                    "!",
+                    "NovelSeries"
+                )):
+                    continue
+                if f[:-4]+'.ePub' not in l:
+                    TextBook(f,True)
+    print("Now ending")
 
-class oneBook:
-    global gb_res
+main = WorkSpace()
+
+class TextBook:
+    global main
     def __init__(self,path:str,inner_style:bool=False) -> None:
-        self.dbg = False
+        if not os.path.exists(path):
+            #raise Exception("No File Found")
+            return
         self.rawText :list[str]= []
         self.GroupBy:tuple[str]= ()
         self.BookTree:list[tuple[str,list[tuple[str,list[str]]]]] = []
         self.quickGB:list[str] = ["!Count100","VOL::","^第[零一二三四五六七八九十百千万0123456789 ]+卷"]
         self.quickSB:list[str] = ["^(:?番外|第[零一二三四五六七八九十百千万0123456789 ]+章)","^===.*==="]
-        self.iStyle = inner_style
-        self.ttf=gb_res.ttf
-
-        self.__call__(path)
         
+        self.style = main.style(path,inner_style,True)
+        self.__call__(path)
+
 
     def openText(self,path:str) -> bool:
-        if not os.path.exists(path):
+        for enc in ['utf-8','utf-16','gb18030']:
+            try:
+                with open(path,'r',encoding=enc) as f:
+                    self.rawText = f.readlines()
+                if enc == 'utf-8':
+                    break
+                with open(path,'w',encoding='utf-8') as g:
+                    g.writelines(self.rawText)
+                break
+            except:
+                pass
+        if len(self.rawText) == 0:
             return False
-        with open(path,'r',encoding='utf-8') as f:
-            self.rawText = f.readlines()
         return True
     def regGroupBy(self,Groupby:str,_DEFAULT = "!Count100") -> bool:
         if not Groupby:
@@ -223,10 +264,10 @@ class oneBook:
         bk.set_identifier(str(uid if uid is not None else uuid.uuid1()))
         bk.add_author(author)
         bk.add_metadata("DC", "description", brief )
-        if self.iStyle:
-            for fontid,(font,data) in enumerate(self.ttf):
-                bk.add_item(epub.EpubItem(f"F{fontid:06d}.ttf",f"{font}","font/ttf",data))        
-        bk.add_item(epub.EpubItem("style.css","style.css","text/css",gb_res.css))
+        if self.style.use_ttf():
+            ttf,fb = self.style.get_ttf()
+            bk.add_item(epub.EpubItem("FONT001.font",ttf,"font/ttf",fb))
+        bk.add_item(epub.EpubItem("style.css","style.css","text/css",self.style.get_css()))
         spine_tmp = ["nav"]
         SectionCount = sum([ len(ils[1])  for ils in self.BookTree ])
         with trange(1,SectionCount+1) as TBAR:
@@ -238,7 +279,7 @@ class oneBook:
                 SectionBuild.append([])
                 for sid,(SectionName, PageLsStr) in enumerate(innerLS,1):
                     TBAR.set_description_str(f"C{cid:03d}S{sid:06d}")
-                    _pagenow = gb_res.PageGenerator(
+                    _pagenow = WorkSpace.GenEpubPage(
                         cid,sid,next(UT),SectionName,PageLsStr
                     )
                     bk.add_item(_pagenow)
@@ -267,8 +308,11 @@ class oneBook:
             print(f" unable to open file{path}!!!")
             return
         _NOK = True
-        _NP3 = subprocess.Popen("notepad.exe "+f)
+        _NP3 = subprocess.Popen(f"notepad.exe \"./{path}\"")
         while(_NOK):
+            os.system("cls")
+            print(">>>       YOU ARE RUNNING oneBook NOW       <<<\n\n\n",
+                 f" Find File `{path               :^25}`,...Done.")
             while input(">Update File?\nYes/[N]o > ").strip() not in ['','n','N','no','NO']:
                 self.openText(path)
                 os.system("cls")
@@ -277,14 +321,14 @@ class oneBook:
             print(">>>       YOU ARE RUNNING oneBook NOW       <<<\n\n\n",
                  f" Find File `{path               :^25}`,...Done.\n",
                   " Confirm the text file,...                Done.")
-            while not self.regGroupBy( input(">Group By your Section, {}\n".format('\n'.join([":: "+str(_[0]) + " is `{}`".format(_[1]) for _ in zip(range(len(self.quickGB)),self.quickGB) ]))).strip()):
+            while not self.regGroupBy( input(">Group By your Section, \n{}\n".format('\n'.join([":: "+str(_[0]) + " is `{}`".format(_[1]) for _ in zip(range(len(self.quickGB)),self.quickGB) ]))).strip()):
                 print("Parmer ERROR, please re input")
             os.system("cls")
             print(">>>       YOU ARE RUNNING oneBook NOW       <<<\n\n\n",
                  f" Find File `{path               :^25}`,...Done.\n",
                   " Confirm the text file,...                Done.\n",
                   " Set `GroupBy`,...                        Done.")
-            while not self.regSection( input(">Set your Section, {}\n".format('\n'.join([ ":: "+str(_[0])+ " is `{}`".format(_[1]) for _ in zip(range(len(self.quickSB)),self.quickSB) ]))).strip()):
+            while not self.regSection( input(">Set your Section, \n{}\n".format('\n'.join([ ":: "+str(_[0])+ " is `{}`".format(_[1]) for _ in zip(range(len(self.quickSB)),self.quickSB) ]))).strip()):
                 print("Parmer ERROR, please re input")
             os.system("cls")
             print(">>>       YOU ARE RUNNING oneBook NOW       <<<\n\n\n",
@@ -305,15 +349,4 @@ class oneBook:
         _NP3.kill()
 
 if __name__ =='__main__':
-    print("Now running")
-    l = os.listdir()
-    for f in l:
-        if f.endswith('.txt'):
-            if f.startswith((
-                "!",
-                "NovelSeries"
-            )):
-                continue
-            if f[:-4]+'.ePub' not in l:
-                oneBook(f,True)
-    print("Now ending")
+    main()
