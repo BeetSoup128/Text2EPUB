@@ -5,7 +5,7 @@
 }
 
 body { 
-    font-family: "beetsoup_gntfts";
+    font-family: "beetsoup_gntfts","LXGW WenKai GB";
     padding: 0;
     margin-left: 0px;
     margin-right: 0px;
@@ -14,7 +14,7 @@ body {
 }
 
 p { 
-    font-family: "beetsoup_gntfts";
+    font-family: "beetsoup_gntfts","LXGW WenKai GB";
     font-size: 26px;
     line-height: 150%;
     text-indent: 2em;

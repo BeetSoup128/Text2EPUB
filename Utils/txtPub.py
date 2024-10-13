@@ -5,7 +5,11 @@ from tqdm import trange
 
 class resources:
     
+    
     def __init__(self) -> None:
+        self.Local_Fonts:list[str] = [
+            "LXGW WenKai GB"
+        ]
         self.init_ttf()
         self.init_css()
     def init_ttf(self) -> None:
@@ -18,7 +22,8 @@ class resources:
         pf="@font-face {\n    font-family: \"beetsoup_gntfts\";\n    src:{\n"
         for ttfname,_ in self.ttf:
             pf += f"        url(\"./{ttfname}\"),\n"
-        pf = pf[:-2]+';\n    }\n}\n'
+        for localf in self.Local_Fonts:
+            pf += f"        local(\"{localf}B\");\n"+'    }\n}\n'
         with open(f"./Utils/style.css",'r',encoding='utf-8') as f:
             cssf = f.read()
         self.css = pf+cssf
