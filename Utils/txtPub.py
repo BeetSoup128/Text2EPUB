@@ -109,27 +109,33 @@ class WorkSpace:
                 )):
                     continue
                 if f[:-4]+'.ePub' not in l:
-                    TextBook(f,True)
+                    TextBook(f,True,True)
     print("Now ending")
 
 main = WorkSpace()
 
 class TextBook:
     global main
-    def __init__(self,path:str,inner_style:bool=False) -> None:
+    def __init__(self,path:str,inner_style:bool=False,replace:bool=True) -> None:
         if not os.path.exists(path):
             #raise Exception("No File Found")
             return
         self.rawText :list[str]= []
-        self.GroupBy:tuple[str]= ()
+        self.ChapterBy = ()
         self.BookTree:list[tuple[str,list[tuple[str,list[str]]]]] = []
-        self.quickGB:list[str] = ["!Count100","VOL::","^第[零一二三四五六七八九十百千万0123456789 ]+卷"]
-        self.quickSB:list[str] = ["^(:?番外|第[零一二三四五六七八九十百千万0123456789 ]+章)","^===.*==="]
-        
+        self.quickCB:list[str] = ["!Count100","VOL::","^第[零一两二三四五六七八九十百千万0123456789 ]+卷"]
+        self.quickSB:list[str] = ["^(:?番外|第[零一两二三四五六七八九十百千万0123456789 ]+章)","^===.*==="]
         self.style = main.style(path,inner_style,True)
-        self.__call__(path)
-
-
+        try:
+            self.AUTO(path)
+        except BaseException :
+            self.CLI(path)
+            if replace:
+                with open(path,'w',encoding='utf-8') as f:
+                    ls = [":: BeetSoup doc Rev 1",self.c_ChapBy,self.c_SectBy,*self.c_Data]
+                    f.write('\n'.join(ls)+'\n\n')
+                    f.writelines(self.rawText)
+        
     def openText(self,path:str) -> bool:
         for enc in ['utf-8','utf-16','gb18030']:
             try:
@@ -145,43 +151,45 @@ class TextBook:
         if len(self.rawText) == 0:
             return False
         return True
-    def regGroupBy(self,Groupby:str,_DEFAULT = "!Count100") -> bool:
-        if not Groupby:
-            Groupby = _DEFAULT
+    def regChapterBy(self,ChapBy:str,_DEFAULT = "!Count100") -> bool:
+        if not ChapBy:
+            ChapBy = _DEFAULT
         try:
-            Groupby = self.quickGB[int(Groupby)]
+            ChapBy = self.quickCB[int(ChapBy)]
         except:
             pass
-        if Groupby.startswith("!Count"):
+        self.c_ChapBy = ChapBy
+        if ChapBy.startswith("!Count"):
             try:
-                sectionSplit = int(Groupby[6:])
-                self.GroupBy:tuple[str,int]= ('num',sectionSplit,)
+                sectionSplit = int(ChapBy[6:])
+                self.ChapterBy:tuple[str,int]= ('num',sectionSplit,)
                 return True
             except:
                 return False
-        if Groupby.startswith("rg[") and Groupby.endswith("]"):
+        if ChapBy.startswith("rg[") and ChapBy.endswith("]"):
             try:
-                sectionSplitls = Groupby[3:-1].split(',')
-                self.GroupBy = ('ls',[re.compile(_) for _ in sectionSplitls],)
+                sectionSplitls = ChapBy[3:-1].split(',')
+                self.ChapterBy = ('ls',[re.compile(_) for _ in sectionSplitls],)
                 return True
             except:
                 return False
         try:
-            self.GroupBy = ('re',re.compile(Groupby),)
+            self.ChapterBy = ('re',re.compile(ChapBy),)
             return True
         except:
             return False
-    def regSection(self,Sect:str,_DEFAULT = r"^(:?番外|第[零一二三四五六七八九十百千万0123456789 ]+章)") -> bool:
-        if not Sect:
-            Sect = _DEFAULT
+    def regSectionBy(self,SectBy:str,_DEFAULT = r"^(:?番外|第[零一二三四五六七八九十百千万0123456789 ]+章)") -> bool:
+        if not SectBy:
+            SectBy = _DEFAULT
         try:
-            Sect = self.quickSB[int(Sect)]
+            SectBy = self.quickSB[int(SectBy)]
         except:
             pass
-        _PattSec =  re.compile(Sect)
-        match self.GroupBy[0]:
+        self.c_SectBy = SectBy
+        _PattSec =  re.compile(SectBy)
+        match self.ChapterBy[0]:
             case "num":
-                SectMax: int = self.GroupBy[1]
+                SectMax: int = self.ChapterBy[1]
                 _SectionCount :int = 0
                 self.BookTree = [ (f"Chapter>>{_SectionCount:06d}~{_SectionCount+SectMax:06d}<<",
                                    [("DefaultSection",["Init Section Here"])]) ]
@@ -198,7 +206,7 @@ class TextBook:
                     continue
             case "ls":
                 self.BookTree = []
-                _PatLS:list[re.Pattern] = self.GroupBy[1]
+                _PatLS:list[re.Pattern] = self.ChapterBy[1]
                 _INITB = True
                 _INITC = True
                 for line in self.rawText:
@@ -228,7 +236,7 @@ class TextBook:
                                 self.BookTree[-1][1][-1][1].append(line)
             case "re":
                 self.BookTree = []
-                _PatChap : re.Pattern = self.GroupBy[1]
+                _PatChap : re.Pattern = self.ChapterBy[1]
                 _INITB = True
                 _INITC = True
                 for line in self.rawText:
@@ -257,7 +265,7 @@ class TextBook:
                 return False
         return True
     def regBook(self,name:str,author:str,brief:str="Default Brief",uid:bytearray=None)->None:
-        self._name = name
+        self.c_Data = (name,author,brief.replace("\n",'\\n'))
         bk = epub.EpubBook()
         bk.set_language('zh')
         bk.set_title(name)
@@ -294,9 +302,32 @@ class TextBook:
         bk.add_item(epub.EpubNav())
         bk.spine = spine_tmp
         self.bk = bk
-    def Generate(self,path:str)-> None:
+    def SaveBook(self,path:str)-> None:
         epub.write_epub(path,self.bk)
-    def __call__(self,path:str):
+    def AUTO(self,path:str):
+        os.system("cls")
+        print(f"AUTO RUNNING:{path}")
+        with open(path,'r',encoding='utf-8') as f:
+            a = f.readline().strip()
+            if a == ":: BeetSoup doc Rev 1":
+                ChapBy = f.readline().strip()
+                SectBy = f.readline().strip()
+                name   = f.readline().strip()
+                ah     = f.readline().strip()
+                brief  = f.readline().replace("\\n",'\n')
+        if self.openText(path):
+            print('\n'.join([ChapBy,SectBy,name,ah,brief]))
+            if self.openText(path):
+                if self.regChapterBy(ChapBy) :
+                    if self.regSectionBy(SectBy):
+                        self.regBook(name,ah,brief)
+                        self.SaveBook(path.rsplit('.')[0]+".ePub")
+                        return
+        raise Exception("SomeError!")
+                
+
+
+    def CLI(self,path:str):
         os.system("cls")
         print(">>>       YOU ARE RUNNING oneBook NOW       <<<\n\n")
         print(f" Opening file in `{path               :^25}`.     ")
@@ -321,14 +352,14 @@ class TextBook:
             print(">>>       YOU ARE RUNNING oneBook NOW       <<<\n\n\n",
                  f" Find File `{path               :^25}`,...Done.\n",
                   " Confirm the text file,...                Done.")
-            while not self.regGroupBy( input(">Group By your Section, \n{}\n".format('\n'.join([":: "+str(_[0]) + " is `{}`".format(_[1]) for _ in zip(range(len(self.quickGB)),self.quickGB) ]))).strip()):
+            while not self.regChapterBy( input(">Group By your Section, \n{}\n".format('\n'.join([":: "+str(_[0]) + " is `{}`".format(_[1]) for _ in zip(range(len(self.quickCB)),self.quickCB) ]))).strip()):
                 print("Parmer ERROR, please re input")
             os.system("cls")
             print(">>>       YOU ARE RUNNING oneBook NOW       <<<\n\n\n",
                  f" Find File `{path               :^25}`,...Done.\n",
                   " Confirm the text file,...                Done.\n",
                   " Set `GroupBy`,...                        Done.")
-            while not self.regSection( input(">Set your Section, \n{}\n".format('\n'.join([ ":: "+str(_[0])+ " is `{}`".format(_[1]) for _ in zip(range(len(self.quickSB)),self.quickSB) ]))).strip()):
+            while not self.regSectionBy( input(">Set your Section, \n{}\n".format('\n'.join([ ":: "+str(_[0])+ " is `{}`".format(_[1]) for _ in zip(range(len(self.quickSB)),self.quickSB) ]))).strip()):
                 print("Parmer ERROR, please re input")
             os.system("cls")
             print(">>>       YOU ARE RUNNING oneBook NOW       <<<\n\n\n",
@@ -342,7 +373,7 @@ class TextBook:
             print("All is done, Now Working!!!")
             self.regBook(path[:-4]if '' == n else n,a,"Default Brief Here" if not b else b)
             print("Now Saving!")
-            self.Generate(path.rsplit('.')[0]+".ePub")
+            self.SaveBook(path.rsplit('.')[0]+".ePub")
             a = input("OK?[Y]es/No").strip().lower()
             if a in "yes":
                 _NOK = False
