@@ -393,6 +393,7 @@ class TextBook:
             if a in "yes":
                 _NOK = False
         _NP3.kill()
+        return
 
 if __name__ =='__main__':
     main()
