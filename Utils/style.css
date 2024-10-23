@@ -6,6 +6,7 @@
 
 body { 
     font-family: "beetsoup_gntfts","LXGW WenKai GB";
+    font-size: 100%;
     padding: 0;
     margin-left: 0px;
     margin-right: 0px;
@@ -13,9 +14,20 @@ body {
     widows: 0;
 }
 
+h1,h2,h3,h4,h5,h6 {
+    text-align: center;
+}
+
+h1 {font-size: 2.5em;}
+h2 {font-size: 1.85em;}
+h3 {font-size: 1.35em;}
+h4 {font-size: 1.00em;}
+h5 {font-size: 0.75em;}
+h6 {font-size: 0.55em;}
+
 p { 
     font-family: "beetsoup_gntfts","LXGW WenKai GB";
-    font-size: 26px;
+    font-size: 1.00em;
     line-height: 150%;
     text-indent: 2em;
     margin-top: 1.5em;

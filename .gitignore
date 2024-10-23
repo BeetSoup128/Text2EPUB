@@ -1,9 +1,9 @@
-/!!!Backups/*.txt
-/!!!Backups/*.ePub
-/!!!Backups/
-/Utils/*.ttf
+/!!!Backups
 /!!!Code.bat
 /*.txt
 /*.ePub
-*.backup
+Utils/*.backup
+Utils/*.ttf
 Utils/requirements.txt
+Utils/txtPub2.py
+Utils/tmp.py

@@ -5,11 +5,12 @@ from tqdm import trange
 class Style:
     def __init__(self,txtpath:str,ttf:str,b:bytes,csst:str,us:bool,zs:bool) -> None:
         self.ttf = (ttf,b,)
+        self.reload = False
         self.conf = (us,zs,)
         if us :
             self.css = ("@font-face {\n    font-family: \"beetsoup_gntfts\";\n    src:\n", ";\n    \n}\n"+ csst,)
             if zs :
-                self.ctx = subprocess.Popen(f"pyftsubset ./Utils/{ttf} --text-file={txtpath} --flavor=woff2 --output-file=./tmp.woff2")
+                self.ctx = subprocess.Popen(f"pyftsubset ./Utils/{ttf} --text-file=\"{txtpath}\" --flavor=woff2 --output-file=./tmp.woff2")
         else :
             self.css = ("",csst,)
     def _get_css(self) -> str:
@@ -19,14 +20,19 @@ class Style:
         return self.css[0] + f"url(\"{self.ttf[0]}\"),local(\"{self.ttf[0]}\")" + self.css[1]
     def get_css(self) -> bytes:
         return self._get_css().encode()
-    def get_ttf(self) -> tuple[str,bytes] :
+    def _load_ttf(self) -> None:
+        if self.reload :
+            return 
         if self.conf[1]:
             self.ctx.wait()
             with open(f"./tmp.woff2",'rb') as f:
-                _ret=(self.ttf[0][:-4]+".woff2",f.read(),)
+                self.reduce_ttf=(self.ttf[0][:-4]+".woff2",f.read(),)
             os.remove("./tmp.woff2")
-            return _ret
-        return self.ttf
+            self.reload = True
+        return 
+    def get_ttf(self) -> tuple[str,bytes] :
+        self._load_ttf()
+        return self.reduce_ttf if self.conf[1] else self.ttf
     def use_ttf(self) -> bool:
         return self.conf[0]
 
@@ -46,6 +52,9 @@ class WorkSpace:
         return Style(path,self.ttf[0],self.ttf[1],self.css,using_style,zip_style)
     @staticmethod
     def FmtStrXhtml(iStr:str,level:int=1) -> str:
+        iStr = iStr.strip()
+        if level < 0:
+            iStr = re.sub(u"[\\x00-\\x08\\x0b\\x0e-\\x1f\\x7f]", '',iStr)
         if level < 1:
             pbs4 = bs4.BeautifulSoup(iStr,"html.parser")
             for _ in pbs4.select("*"):
@@ -69,7 +78,7 @@ class WorkSpace:
                 .replace('"', "&quot;")\
                 .replace('\'', "&#x27;")\
                 .replace(' ',"&nbsp;")
-        return re.sub(u"[\\x00-\\x08\\x0b\\x0e-\\x1f\\x7f]", '',iStr).strip()
+        return iStr
     @staticmethod
     def GenEpubPage(cid:int,sid:int,uid:int,title:str,pages:str|list[str],spliter:typing.Literal["CR","LF","CRLF"]="CRLF"):
         titleF  = WorkSpace.FmtStrXhtml(title)
@@ -110,7 +119,23 @@ class WorkSpace:
                     continue
                 if f[:-4]+'.ePub' not in l:
                     TextBook(f,True,True)
-    print("Now ending")
+        print("Now ending")
+    @staticmethod
+    def resave_asu8(path:str) -> bool:
+        for enc in ['utf-8','utf-16','gb18030']:
+            try:
+                with open(path,'r',encoding=enc) as f:
+                    rawText = f.readlines()
+                if enc == 'utf-8':
+                    break
+                with open(path,'w',encoding='utf-8') as g:
+                    g.writelines(rawText)
+                break
+            except:
+                pass
+        if len(rawText) == 0:
+            return False
+        return True
 
 main = WorkSpace()
 
@@ -120,14 +145,14 @@ class TextBook:
         if not os.path.exists(path):
             #raise Exception("No File Found")
             return
+        WorkSpace.resave_asu8(path)
         self.rawText :list[str]= []
         self.ChapterBy = ()
         self.BookTree:list[tuple[str,list[tuple[str,list[str]]]]] = []
-        self.quickCB:list[str] = ["!Count100","VOL::","^第[零一两二三四五六七八九十百千万0123456789 ]+卷"]
+        self.quickCB:list[str] = ["!Count100","^VOL::.*","^第[零一两二三四五六七八九十百千万0123456789 ]+卷"]
         self.quickSB:list[str] = ["^(:?番外|第[零一两二三四五六七八九十百千万0123456789 ]+章)","^===.*==="]
-        self.style = main.style(path,inner_style,True)
         try:
-            self.AUTO(path)
+            self.AUTO(path,inner_style)
         except BaseException :
             self.CLI(path)
             if replace:
@@ -135,19 +160,9 @@ class TextBook:
                     ls = [":: BeetSoup doc Rev 1",self.c_ChapBy,self.c_SectBy,*self.c_Data]
                     f.write('\n'.join(ls)+'\n\n')
                     f.writelines(self.rawText)
-        
     def openText(self,path:str) -> bool:
-        for enc in ['utf-8','utf-16','gb18030']:
-            try:
-                with open(path,'r',encoding=enc) as f:
-                    self.rawText = f.readlines()
-                if enc == 'utf-8':
-                    break
-                with open(path,'w',encoding='utf-8') as g:
-                    g.writelines(self.rawText)
-                break
-            except:
-                pass
+        with open(path,'r',encoding='utf-8') as f:
+            self.rawText = f.readlines()
         if len(self.rawText) == 0:
             return False
         return True
@@ -304,9 +319,10 @@ class TextBook:
         self.bk = bk
     def SaveBook(self,path:str)-> None:
         epub.write_epub(path,self.bk)
-    def AUTO(self,path:str):
+    def AUTO(self,path:str,__inner_style:bool):
         os.system("cls")
         print(f"AUTO RUNNING:{path}")
+        self.style = main.style(path,__inner_style,True)
         with open(path,'r',encoding='utf-8') as f:
             a = f.readline().strip()
             if a == ":: BeetSoup doc Rev 1":
@@ -315,7 +331,8 @@ class TextBook:
                 name   = f.readline().strip()
                 ah     = f.readline().strip()
                 brief  = f.readline().replace("\\n",'\n')
-        if self.openText(path):
+                self.rawText = f.readlines()
+        if len(self.rawText)!= 0:
             print('\n'.join([ChapBy,SectBy,name,ah,brief]))
             if self.openText(path):
                 if self.regChapterBy(ChapBy) :
@@ -324,8 +341,6 @@ class TextBook:
                         self.SaveBook(path.rsplit('.')[0]+".ePub")
                         return
         raise Exception("SomeError!")
-                
-
 
     def CLI(self,path:str):
         os.system("cls")
