@@ -1,87 +1,154 @@
-import re,os,uuid,bs4,zhconv,subprocess,typing
+import os,typing,subprocess,re,io,zipfile,multiprocessing,pickle,base64,shutil,time
+
+from fontTools import subset,ttLib
 from ebooklib import epub
-from tqdm import trange
+from zhconv import convert as Chconv
+from weakref import ref
+from rich.console import Console as RConsole
+from uuid import uuid1
 
-class Style:
-    def __init__(self,txtpath:str,ttf:str,b:bytes,csst:str,us:bool,zs:bool) -> None:
-        self.ttf = (ttf,b,)
-        self.reload = False
-        self.conf = (us,zs,)
-        if us :
-            self.css = ("@font-face {\n    font-family: \"beetsoup_gntfts\";\n    src:\n", ";\n    \n}\n"+ csst,)
-            if zs :
-                self.ctx = subprocess.Popen(f"pyftsubset ./Utils/{ttf} --text-file=\"{txtpath}\" --flavor=woff2 --output-file=./tmp.woff2")
-        else :
-            self.css = ("",csst,)
-    def _get_css(self) -> str:
-        if self.conf[1]:
-            self.ctx.wait()
-            return self.css[0] + f"url(\"./{self.ttf[0][:-4]}.woff2\")  format(\"woff2\") , local(\"{self.ttf[0]}\")" + self.css[1]
-        return self.css[0] + f"url(\"{self.ttf[0]}\"),local(\"{self.ttf[0]}\")" + self.css[1]
-    def get_css(self) -> bytes:
-        return self._get_css().encode()
-    def _load_ttf(self) -> None:
-        if self.reload :
-            return 
-        if self.conf[1]:
-            self.ctx.wait()
-            with open(f"./tmp.woff2",'rb') as f:
-                self.reduce_ttf=(self.ttf[0][:-4]+".woff2",f.read(),)
-            os.remove("./tmp.woff2")
-            self.reload = True
-        return 
-    def get_ttf(self) -> tuple[str,bytes] :
-        self._load_ttf()
-        return self.reduce_ttf if self.conf[1] else self.ttf
-    def use_ttf(self) -> bool:
-        return self.conf[0]
-
-class WorkSpace:
-    def __init__(self) -> None:
-        self.Local_Font:str = "LXGW WenKai GB"
-        with open(f"./Utils/style.css",'r',encoding='utf-8') as f:
-            self.css = f.read()
-        self.init_ttf()
-    def init_ttf(self) -> None:
-        self.ttf:tuple[str,bytes] =()
-        for ttfn in filter(lambda x:x.endswith("ttf"),os.listdir("Utils")):
-            with open(f"./Utils/{ttfn}",'rb') as f:
-                self.ttf=(ttfn,f.read(),)
-                return
-    def style(self,path:str,using_style:bool,zip_style:bool) -> Style:
-        return Style(path,self.ttf[0],self.ttf[1],self.css,using_style,zip_style)
+class Utils:
+    class Cfg(typing.NamedTuple):
+        targ:str = "."
+        cache:str= "./!!!Backups"
+        utils:str= "./Utils"
+        sync:str|None=None
+    class TUI:
+        class __Display:
+            def __init__(self,rTUI:ref):
+                self.r:ref[Utils.TUI] = rTUI
+            @property
+            def __TUI(self):
+                if (__t := self.r() )is None:
+                    raise RuntimeError("No TUI inst")
+                return __t
+            def All(self):
+                t = self.__TUI
+                for obj in t.RegdObjects:
+                    t.c.print(obj)
+            def __call__(self):
+                t = self.__TUI
+                t.c.clear()
+                for obj in t.RegdObjects:
+                    t.c.print(obj)
+            def Tmp(self,*objs):
+                for o in objs:
+                    self.__TUI.c.print(o)
+        def __init__(self):
+            self.c = RConsole(markup=False)
+            self.RegdObjects:list = []
+            self.Display = self.__Display(ref(self))
+        def RegObj(self, *obj) -> None:
+            self.RegdObjects.extend([o for o in obj])
+        def clear(self):
+            self.RegdObjects.clear()
+    class QuickMarker:
+        def __init__(self,LevelName:str,QuickChoices:list[str]=None):
+            self.LVn = LevelName
+            self.choices = QuickChoices if QuickChoices is not None else []
+        @classmethod
+        def All(cls):
+            Parmers :list[tuple] = [("Section",[]),("Chapter",[])]
+            return [Utils.QuickMarker(*P) for P in Parmers]
+    _T = typing.TypeVar("_T")
     @staticmethod
-    def FmtStrXhtml(iStr:str,level:int=1) -> str:
-        iStr = iStr.strip()
-        if level < 0:
-            iStr = re.sub(u"[\\x00-\\x08\\x0b\\x0e-\\x1f\\x7f]", '',iStr)
-        if level < 1:
-            pbs4 = bs4.BeautifulSoup(iStr,"html.parser")
-            for _ in pbs4.select("*"):
-                if 'style' in _.attrs:
-                    del _['style']
-            for _ in pbs4.select("script"):
-                _.extract()
-            iStr = pbs4.prettify()
-        if level < 2 :
-            iStr = zhconv.convert(iStr, "zh-hans")\
-                .replace('“', '「')\
-                .replace('”', '」')\
-                .replace('‘', '『')\
-                .replace('’', '』')\
-                .replace("&nbsp;", '')\
-                .replace('\\n', '')
-        if level < 3:
-            iStr = iStr.replace("&", "&amp;")\
-                .replace("<", "&lt;")\
-                .replace(">", "&gt;")\
-                .replace('"', "&quot;")\
-                .replace('\'', "&#x27;")\
-                .replace(' ',"&nbsp;")
-        return iStr
+    def Check(d:dict,_k,_default:_T) -> _T:
+        r = d.get(_k,_default)
+        if not isinstance(r,type(_default)):
+            raise Exception("ParmerError")
+        return r
     @staticmethod
-    def GenEpubPage(cid:int,sid:int,uid:int,title:str,pages:str|list[str],spliter:typing.Literal["CR","LF","CRLF"]="CRLF"):
-        titleF  = WorkSpace.FmtStrXhtml(title)
+    def _Gcss(regls:list[dict[str,str]],names:list[str]) -> str:
+        css = ""
+        regfont = ' '.join([f"@font-face{{font-family:{_['font-family']};{_['at']}}}" for _ in regls])
+        familys = ','.join([f"\"{_}\"" for _ in names])
+        css += regfont
+        css += f"@page{{margin-top:0px;margin-bottom:0px}}body{{font-family:{familys};font-size:100%;padding:0;margin-left:0px;margin-right:0px;orphans:0;widows:0;}}p{{font-family:{familys};font-size:1em;line-height:150%;text-indent:2em;margin-top:1.5em;margin-bottom:0;margin-left:0;margin-right:0;orphans:0;widows:0;}}"
+        css += "h1,h2,h3,h4,h5,h6{text-align:center}h1{font-size:2.5em}h2{font-size:1.85em}h3{font-size:1.35em}h4{font-size:1.00em}h5{font-size:0.75em}h6{font-size:0.55em}.a{text-indent:0em}div.centeredimage{text-align:center;display:block;margin-top:0.5em;margin-bottom:0.5em}img.attpic{border:1px solid;max-width:100%;margin:0}.booktitle{margin-top:30%;margin-bottom:0;border-style:none solid none none;border-width:50px;font-size:3em;line-height:120%;text-align:right}.bookauthor{margin-top:0;border-style:none solid none none;border-width:50px;page-break-after:always;font-size:large;line-height:120%;text-align:right}.titletoc,.titlel1top,.titlel1std,.titlel2top,.titlel2std,.titlel3top,.titlel3std,.titlel4std{margin-top:0;border-style:none double none solid;border-width:0px 5px 0px 20px;padding:45px 5px 5px 5px;font-size:x-large;line-height:115%;text-align:justify}.titlel1single,.titlel2single,.titlel3single{margin-top:35%;border-style:none solid none none;border-width:30px;padding:30px 5px 5px 5px;font-size:x-large;line-height:125%;text-align:right}"
+        return css
+    @classmethod
+    def css(cls,fonfFamily:str,fontUrl:str,fontFormat:str="ttf") -> str:
+        """Optional More url in one str, but just kep `fontFormat` is None"""
+        if fontFormat is None:
+            fontReg = [{"font-family":fonfFamily,"at":f"url(\"{fontUrl}\")"}]
+        else:
+            fontReg = [{"font-family":fonfFamily,"at":f"url(\"{fontUrl}\") format(\"{fontFormat}\")"}]
+        fontExtra = [_["font-family"] for _ in fontReg] + ["LXGW WenKai GB"]
+        return cls._Gcss(fontReg,fontExtra)
+    @classmethod
+    def cssl(cls,fontadds:list[dict[str,str]]) -> str:
+        for _ in fontadds:
+            for p in ["font-family","at"]:
+                if p not in _:
+                    raise Exception("ParmerError!!!\nNo font family found")
+        fontReg = [{"font-family":_["font-family"],"at":_["at"]} for _ in fontadds]
+        fontExtra = [_["font-family"] for _ in fontReg] + ["LXGW WenKai GB"]
+        return cls._Gcss(fontReg,fontExtra)
+    @staticmethod
+    def __CmpFontWith(fontfile,target_str:str) -> bytes:
+        ft = ttLib.TTFont(fontfile)
+        sr = subset.Subsetter()
+        sr.populate(text=target_str)
+        sr.subset(ft)
+        ft.flavor = "woff2"
+        with io.BytesIO() as tmp:
+            ft.save(tmp,False)
+            tmp.seek(0)
+            target = tmp.read()
+        return target
+    @staticmethod
+    def GenFonttoQ(strLS:list[str],Q:multiprocessing.Queue):
+        fb = io.BytesIO(Q.get())
+        ft = ttLib.TTFont(fb)
+        sr = subset.Subsetter()
+        sr.populate(text=''.join(strLS))
+        sr.subset(ft)
+        ft.flavor = "woff2"
+        _qio = io.BytesIO()
+        ft.save(_qio,False)
+        Q.put_nowait(_qio.getvalue())
+    @staticmethod
+    def __check(strls:list[str],at:slice) -> bool:
+        for line in strls[at]:
+            if not line[at].isspace():
+                return True
+        return False
+    @staticmethod
+    def loadu8f(fileat:str) -> list[str]:
+        codecs = ['utf-8','utf-16','gb18030']
+        for cd in codecs:
+            try:
+                with open(fileat,'a+t',encoding=cd,errors='strict') as targ:
+                    targ.seek(0)
+                    result = targ.readlines()
+                    result = [_.rstrip()+"\n" for _ in result]
+                    targ.truncate(0)
+                    targ.seek(0)
+                    targ.writelines(result)
+                    return result
+            except UnicodeDecodeError:
+                continue
+            except FileNotFoundError:
+                raise Exception(f"FileNotFound:{fileat} at {os.getcwd()}")
+            except PermissionError:
+                raise Exception(f"PermissionNotAllowed:{fileat} at {os.getcwd()}")
+        raise Exception("No codecs found")
+    @staticmethod
+    def bookPath(name:str,path:str) -> str:
+        return os.path.join(path,name)
+    @staticmethod
+    def FmtStrXhtml(iStr:str) -> str:
+        return Chconv(iStr, "zh-hans").replace('“', '「').replace('”', '」').replace('‘', '『').replace('’', '』').replace("&nbsp;", '').replace('\\n', '').strip()
+    @classmethod
+    def FmtStrXhtmlH(cls,iStr:str) -> str:
+        return cls.FmtStrXhtml(iStr).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;").replace('\'', "&#x27;").replace(' ',"&nbsp;").strip()
+    @classmethod
+    def SafeGEP(cls,b:int,e:int,title:str,pages:str|list[str],spliter:typing.Literal["CR","LF","CRLF"]="CRLF"):
+        if cls.__check(pages if isinstance(pages,list) else [pages],slice(None,None,1)):
+            return cls.GenEpubPage(b,e,title,pages,spliter)
+    @classmethod
+    def GenEpubPage(cls,b:int,e:int,title:str,pages:str|list[str],spliter:typing.Literal["CR","LF","CRLF"]="CRLF"):
+        titleF  = cls.FmtStrXhtml(title)
         if isinstance(pages,str):
             _pls = pages.split(spliter.replace("CR",'\r').replace("LF",'\n'))
         elif isinstance(pages,list):
@@ -93,307 +160,330 @@ class WorkSpace:
             '<body>\n',
             '  <div>\n'
            f'    <h3>{titleF}</h3>\n\n',
-            *[ '' if len(frame.strip())==0 else f"    <p>{WorkSpace.FmtStrXhtml(frame)}</p>\n\n    <br/>\n\n" for frame in _pls],
+            *[ '' if len(frame.strip())==0 else f"    <p>{cls.FmtStrXhtml(frame)}</p>\n\n    <br/>\n\n" for frame in _pls],
             '  </div>\n</body>\n</html>']
         _res = (''.join(restmp)).encode("utf-8")
         # Build EpubH5Page
         _EH = epub.EpubHtml(
-            f"U{uid:06d}.xhtml", 
-            f"C{cid:03d}S{sid:06d}.xhtml",
+            f"U{b:06d}.xhtml", 
+            f"R{b}_{e}.xhtml",
             "application/xhtml+xml",
             _res,
-            title.strip(),'zh-CN'
+            title.strip(),
+            'zh-CN'
         )
         _EH.add_link(rel="stylesheet", href="./style.css", type="text/css")
         return _EH
-    @staticmethod
-    def __call__():
-        print("Now running")
-        l = os.listdir()
-        for f in l:
-            if f.endswith('.txt'):
-                if f.startswith((
-                    "!",
-                    "NovelSeries"
-                )):
-                    continue
-                if f[:-4]+'.ePub' not in l:
-                    TextBook(f,True,True)
-        print("Now ending")
-    @staticmethod
-    def resave_asu8(path:str) -> bool:
-        for enc in ['utf-8','utf-16','gb18030']:
-            try:
-                with open(path,'r',encoding=enc) as f:
-                    rawText = f.readlines()
-                if enc == 'utf-8':
+    @classmethod
+    def GenEpubSubC(cls,data:list[str], lvmap:list[tuple[int,int]], namemap:list[dict|None]) -> tuple[list[epub.EpubHtml], list[tuple[epub.Link, list]]]:
+        entries= lvmap
+        if not entries:
+            return [], []
+        nodes = []
+        stack = []
+        for i, (current_id, current_level) in enumerate(entries):
+            # 计算内容范围
+            next_id = entries[i+1][0] if i < len(entries)-1 else len(data)
+            content_start = current_id + 1
+            content_end = next_id - 1 if i < len(entries)-1 else len(data) - 1
+            # 寻找父节点（最近且级别更小的节点）
+            parent = None
+            for node in reversed(stack):
+                if node['level'] < current_level:
+                    parent = node
                     break
-                with open(path,'w',encoding='utf-8') as g:
-                    g.writelines(rawText)
-                break
+            # 创建新节点
+            new_node = {
+                'id': current_id,
+                'level': current_level,
+                'title': cls.FmtStrXhtmlH(data[current_id]) if namemap[current_level] is None else namemap[current_level][current_id] ,
+                'content_start': content_start,
+                'content_end': content_end,
+                'children': []
+            }
+            if parent is None:
+                stack.append(new_node)
+            else:
+                parent['children'].append(new_node)
+                stack.append(new_node)
+            nodes.append(new_node)
+        spine:list[epub.EpubHtml] = []
+        # 生成TOC结构
+        def build_toc(node) -> tuple[epub.Link, list] | epub.EpubHtml | None:
+            children = node['children']
+            if children:
+                return [epub.Link("####",Utils.FmtStrXhtmlH(node['title']),f"U{node['id']}"),
+                    [c for c in [build_toc(child) for child in children] if c is not None]]
+            else: # 处理内容可能为空的情况
+                content_lines = []
+                if node['content_start'] <= node['content_end']:
+                    content_lines = data[node['content_start'] : node['content_end'] + 1]
+                __cache = cls.SafeGEP(node['content_start'], node['content_end'], node['title'], content_lines, spliter="CRLF")
+                if __cache is not None:
+                    spine.append(__cache)
+                return __cache  # 返回生成的epub.EpubHtml对象
+        toc = build_toc(nodes[0])
+        spine.sort(key=lambda x: x.get_id())  # 确保spine按id排序
+        return spine, toc
+    @staticmethod
+    def BacUp(name:str,Backup:str) -> None:
+        try:
+            os.remove(f"{Backup}/{name}.ePub")
+            os.remove(f"{Backup}/{name}.txt")
+        except:
+            pass
+        shutil.move(f"{name}.txt",Backup)
+        shutil.move(f"{name}.ePub",Backup)
+    def SycUp(name:str,Syncup:str) -> None:
+        try:
+            os.remove(f"{Syncup}/{name}.ePub")
+            shutil.copy(f"{name}.ePub",Syncup)
+        except:
+            pass
+class WorkProcess:
+    HavTitPage = True
+    HavBookLevel = True
+    def run(self,Auto:bool=True,SavRev:int=None):
+        self.ConsoleUI.Display()
+        if self.font_tasK is not None:
+            self.font_tasK.start()
+        if self.listStr[0].strip() == ":: BeetSoup doc Rev 1":
+            self.listStr.pop(0)
+            ChapBy = self.listStr.pop(0).strip()
+            SectBy = self.listStr.pop(0).strip()
+            NameBK = self.listStr.pop(0).strip()
+            AtorBK = self.listStr.pop(0).strip()
+            BrifBK = self.listStr.pop(0).strip()
+            MarkBK = [SectBy,ChapBy]
+        elif self.listStr[0].strip() == ":: PubDoc rev 2":
+            self.listStr.pop(0)
+            KeyTag = self.listStr.pop(0).strip()
+            if KeyTag.startswith("<Book-Infos.data="):
+                if KeyTag.endswith("/>"):
+                    KeyB64 = KeyTag[19:-3]
+            MarkBK,NameBK,AtorBK,BrifBK= pickle.loads(base64.b64decode(KeyB64))
+        else:
+            Auto =False
+        self.listStr = [""] + self.listStr
+        if Auto:
+            self.Auto(MarkBK,NameBK,AtorBK,BrifBK)
+            if SavRev is not None:
+                self.listStr.pop(0)
+                self.reWrite(SavRev,MarkBK,NameBK,AtorBK,BrifBK)
+        else:
+            self.WithTUI()
+            if SavRev is not None:
+                self.listStr.pop(0)
+                self.reWrite(SavRev,*self.list_book_data)
+    def __init__(self,textfp:str,**args):
+        self.cfg = Utils.Check(args,'cfg',Utils.Cfg())
+        self.HintMarker = Utils.Check(args,"Marker",Utils.QuickMarker.All())
+        self.ConsoleUI = Utils.Check(args,"UI",Utils.TUI())
+        self.book = epub.EpubBook()
+        self.strFileName = textfp
+        self.strFilePath = Utils.bookPath(textfp,self.cfg.targ)
+        self.listStr = Utils.loadu8f(self.strFilePath)
+        self.listMatchedLines:list[list[int]] = []
+        self.ConsoleUI.RegObj(f"[blue]Now Working with `{textfp}`.")
+        self.list_marker = []
+        self.list_book_data :list[str]
+        self.tasQ = multiprocessing.Queue(1)
+        self.lsdictMarkerName:list[dict|None] = []
+        __TTFtarg = [Utils.bookPath(p,self.cfg.utils) for p in os.listdir(self.cfg.utils) if p.endswith(".ttf")]
+        if len(__TTFtarg) == 0:
+            self.ConsoleUI.RegObj(f"[blue] No TTF file found")
+            self.font_tasK = None
+        else:
+            with open(__TTFtarg[0],'rb') as g:
+                self.tasQ.put(g.read())
+            self.font_tasK = multiprocessing.Process(target=Utils.GenFonttoQ,args=(self.listStr,self.tasQ))
+    def __CountBy(self,count:slice | int,level:int=0) -> None:
+        self.listMatchedLines.insert(0, self.listMatchedLines[level][count] if isinstance(count,slice) else self.listMatchedLines[level][::count])
+        step:int = count.step if isinstance(count,slice) else count
+        self.lsdictMarkerName.insert(0,{ lidx:f"Count{idx*step+1}~{idx*step+step}" for idx,lidx in enumerate(self.listMatchedLines[0])})
+    def __REBy(self,reP:re.Pattern) -> None:
+        self.listMatchedLines.insert(0, [idx  for idx,words in enumerate(self.listStr) if re.match(reP,words)])
+        self.lsdictMarkerName.insert(0,None)
+    def mark(self,Auto:str|None)-> None:
+        self.ConsoleUI.Display()
+        if Auto is None:
+            __prompt = f"Now try to mark{self.HintMarker[len(self.listMatchedLines)].LVn}" if len(self.HintMarker) < len(self.listMatchedLines) else f"Now try to mark ::level{len(self.listMatchedLines)}"
+            self.ConsoleUI.Display.Tmp("type \\d for Quick chioce(optional),!Count\\d+[:\\d+:\\d+] to match CountBy, and any to match RegExp.",__prompt,
+                *[ f"Quick::{idx:03d}>>`{k}`" for idx,k in enumerate(self.HintMarker[len(self.listMatchedLines)].choices)] )
+            rep = input(" >>> ").strip()
+        else:
+            rep = Auto
+        if re.match("^!Count\\d+:\\d+:\\d+$",rep):
+            self.__CountBy(slice(*[ int(i) for i in rep[6:].split(':',3)]))
+        elif re.match("^!Count\\d+$",rep):
+            self.__CountBy(int(rep[6:]))
+        else:
+            self.__REBy(re.compile(rep))
+        self.list_marker.append(rep)
+        self.ConsoleUI.RegObj(f"[green]Split::{rep} done. Total{len(self.listMatchedLines[0])} matches")
+    def build_book(self) -> None:
+        LvMap = [ (__MLine,__Level) for __Level,__MLines in enumerate(self.listMatchedLines,1) for __MLine in __MLines]
+        LvMap.append((0,len(self.listMatchedLines)))
+        LvMap.append((0,0))
+        self.lsdictMarkerName.insert(0,{0:self.strFileName[:-4]})
+        if self.HavTitPage:
+            self.listStr[0] = "|==扉页==|\n"
+        LvMap.sort()
+        Spine,ToC = Utils.GenEpubSubC(self.listStr, LvMap,self.lsdictMarkerName )
+        for s in Spine:
+            self.book.add_item(s)
+        Spine.insert(0,"nav")
+        if self.HavTitPage:
+            self.listStr[0] = ""
+        if self.HavBookLevel:
+            self.book.toc = [ToC]
+        else:
+            self.book.toc = ToC[1]
+        self.book.add_item(epub.EpubNcx())
+        self.book.add_item(epub.EpubNav())
+        self.book.spine = Spine
+    def save_book(self)-> None:
+        self.ConsoleUI.clear()
+        Writer = epub.EpubWriter(self.strFilePath[:-4]+".ePub", self.book)
+        Writer.process()
+        Writer.out = zipfile.ZipFile(Writer.file_name,'w',zipfile.ZIP_DEFLATED,compresslevel=9)
+        Writer.out.writestr('mimetype', 'application/epub+zip', compress_type=zipfile.ZIP_STORED)
+        Writer._write_container()
+        Writer._write_opf()
+        for itm in self.book.get_items():
+            if isinstance(itm, epub.EpubNcx):
+                itemdata = Writer._get_ncx()
+                Writer.out.writestr('%s/%s' % (self.book.FOLDER_NAME, itm.file_name), itemdata  )
+            elif isinstance(itm, epub.EpubNav):
+                Writer.out.writestr('%s/%s' % (self.book.FOLDER_NAME, itm.file_name), Writer._get_nav(itm))
+            elif isinstance(itm, epub.EpubItem):
+                if itm.manifest:
+                    Writer.out.writestr('%s/%s' % (self.book.FOLDER_NAME, itm.file_name), itm.get_content())
+                else:
+                    Writer.out.writestr('%s' % itm.file_name, itm.get_content())
+        Writer.out.close()
+    def WithTUI(self):
+        self.ConsoleUI.RegObj("[blue]Using Terminal to build this book to EPUB.")
+        self.book.set_language('zh')
+        with subprocess.Popen(f"notepad4 \"./{self.strFilePath}\"") as p:
+            Marking = True
+            while(Marking):
+                try:
+                    self.mark()
+                except KeyboardInterrupt:
+                    Marking = False
+                finally:
+                    continue
+            self.ConsoleUI.Display()
+            self.ConsoleUI.Display.Tmp("Now mark the book infomation")
+            self.list_book_data[0] = input(f"书名::>{self.strFileName}")
+            if self.list_book_data[0].isspace():
+                self.list_book_data[0] = self.strFileName.strip()
+            self.list_book_data[1] = input("作者::>").strip()
+            self.list_book_data[2] = input("简介::>").strip()
+            self.ConsoleUI.RegObj(f"[green]{self.list_book_data[0]}:{self.list_book_data[1]}","[green]"+self.list_book_data[2])
+            self.ConsoleUI.Display()
+            self.book.set_title(self.list_book_data[0])
+            self.book.add_author(self.list_book_data[1])
+            self.book.add_metadata("DC", "description", self.list_book_data[2].replace("\\n",'\n') )
+            self.book.set_identifier(str(uuid1()))
+            p.kill()
+        if self.font_tasK is not None:
+            self.book.add_item(epub.EpubItem("FontWOFF2","Compressed.ttf","font/ttf",self.tasQ.get()))
+            self.book.add_item(epub.EpubItem("StyleCSS","style.css","text/css",Utils.css("CpTTF","./Compressed.ttf","woff2")))
+        else:
+            self.book.add_item(epub.EpubItem("StyleCSS","style.css","text/css",Utils.cssl()))
+        self.build_book()
+        self.save_book()
+    def Auto(self,markers:list[str],name:str,author:str,brief:str):
+        self.ConsoleUI.RegObj("[blue]Auto building this book to EPUB.")
+        self.ConsoleUI.Display()
+        self.book.set_language('zh')
+        for m in markers:
+            self.mark(m)
+        self.ConsoleUI.RegObj(f"[green]{name}:{author}","[green]"+brief)
+        self.ConsoleUI.Display()
+        self.book.add_author(author)
+        self.book.set_title(title=name)
+        self.book.add_metadata("DC", "description", brief )
+        self.book.set_identifier(str(uuid1()))
+        self.build_book()
+        if self.font_tasK is not None:
+            self.book.add_item(epub.EpubItem("FontWOFF2","Compressed.ttf","font/ttf",self.tasQ.get()))
+            self.book.add_item(epub.EpubItem("StyleCSS","style.css","text/css",Utils.css("CpTTF","./Compressed.ttf","woff2")))
+        else:
+            self.book.add_item(epub.EpubItem("StyleCSS","style.css","text/css",Utils.cssl()))
+        self.save_book()
+    def reWrite(self,rev:int,markers:list[str],name:str,author:str,brief:str):
+        if rev == 1:
+            with open(self.strFilePath,'w',encoding="utf-8") as f:
+                f.write(":: BeetSoup doc Rev 1\n")
+                f.write('\n'.join([markers[0],markers[1],name,author,brief.replace("\n","\\n")]))
+                f.writelines(self.listStr)
+            return
+        if rev == 2:
+            with open(self.strFilePath,'w',encoding="utf-8") as f:
+                f.write(":: PubDoc rev 2\n")
+                data_b64_pickle = base64.b64encode(pickle.dumps((markers,name,author,brief)))
+                f.write(f"<Book-Infos.data={data_b64_pickle}/>\n\n")
+                f.writelines(self.listStr)
+EZMaker = [
+        Utils.QuickMarker("简单快速分章节",
+            ["^(:?番外|终章|序章|第[零一两二三四五六七八九十百千万0123456789 ]+章)",
+                "^===.*===",
+                "^Chap\\d+"]),
+        Utils.QuickMarker("简单快速分卷",
+            ["!Count100",
+                "^VOL::.*",
+                "^第[零一两二三四五六七八九十百千万0123456789 ]+卷"])
+    ]
+class MainProcess:
+    def __init__(self,cfg=None,checks=(".txt"),ignores = ("!")):
+        self.Window = Utils.TUI()
+        self.Config = cfg if cfg is not None else Utils.Cfg()
+        a = [p for p in os.listdir(self.Config.targ) if p.endswith(checks) and not p.startswith(ignores)]
+        b = []
+        for i in a:
+            tmp = i
+            for j in checks:
+                tmp = tmp.replace(j,'')
+            b.append(tmp)
+        self.books:list[str] = b
+    def run(self,somebook:str=None,rev:int=2):
+        for n in self.books:
+            if f"{n}.ePub" not in os.listdir(self.Config.targ):
+                WorkProcess(f"{n}.txt",conf = self.Config,
+                    UI = self.Window,
+                    Marker = EZMaker ).run(SavRev=rev)
+        if somebook is not None:
+            try:
+                WorkProcess(somebook,conf = self.Config,
+                    UI = self.Window,
+                    Marker = EZMaker).run(SavRev=rev)
+                self.books.append[somebook[:-4]]
             except:
                 pass
-        if len(rawText) == 0:
-            return False
-        return True
-
-main = WorkSpace()
-
-class TextBook:
-    global main
-    def __init__(self,path:str,inner_style:bool=False,replace:bool=True) -> None:
-        if not os.path.exists(path):
-            #raise Exception("No File Found")
-            return
-        WorkSpace.resave_asu8(path)
-        self.rawText :list[str]= []
-        self.ChapterBy = ()
-        self.BookTree:list[tuple[str,list[tuple[str,list[str]]]]] = []
-        self.quickCB:list[str] = ["!Count100","^VOL::.*","^第[零一两二三四五六七八九十百千万0123456789 ]+卷"]
-        self.quickSB:list[str] = ["^(:?番外|第[零一两二三四五六七八九十百千万0123456789 ]+章)","^===.*==="]
-        try:
-            self.AUTO(path,inner_style)
-        except BaseException :
-            self.CLI(path)
-            if replace:
-                with open(path,'w',encoding='utf-8') as f:
-                    ls = [":: BeetSoup doc Rev 1",self.c_ChapBy,self.c_SectBy,*self.c_Data]
-                    f.write('\n'.join(ls)+'\n\n')
-                    f.writelines(self.rawText)
-    def openText(self,path:str) -> bool:
-        with open(path,'r',encoding='utf-8') as f:
-            self.rawText = f.readlines()
-        if len(self.rawText) == 0:
-            return False
-        return True
-    def regChapterBy(self,ChapBy:str,_DEFAULT = "!Count100") -> bool:
-        if not ChapBy:
-            ChapBy = _DEFAULT
-        try:
-            ChapBy = self.quickCB[int(ChapBy)]
-        except:
-            pass
-        self.c_ChapBy = ChapBy
-        if ChapBy.startswith("!Count"):
-            try:
-                sectionSplit = int(ChapBy[6:])
-                self.ChapterBy:tuple[str,int]= ('num',sectionSplit,)
-                return True
-            except:
-                return False
-        if ChapBy.startswith("rg[") and ChapBy.endswith("]"):
-            try:
-                sectionSplitls = ChapBy[3:-1].split(',')
-                self.ChapterBy = ('ls',[re.compile(_) for _ in sectionSplitls],)
-                return True
-            except:
-                return False
-        try:
-            self.ChapterBy = ('re',re.compile(ChapBy),)
-            return True
-        except:
-            return False
-    def regSectionBy(self,SectBy:str,_DEFAULT = r"^(:?番外|第[零一二三四五六七八九十百千万0123456789 ]+章)") -> bool:
-        if not SectBy:
-            SectBy = _DEFAULT
-        try:
-            SectBy = self.quickSB[int(SectBy)]
-        except:
-            pass
-        self.c_SectBy = SectBy
-        _PattSec =  re.compile(SectBy)
-        match self.ChapterBy[0]:
-            case "num":
-                SectMax: int = self.ChapterBy[1]
-                _SectionCount :int = 0
-                self.BookTree = [ (f"Chapter>>{_SectionCount:06d}~{_SectionCount+SectMax:06d}<<",
-                                   [("DefaultSection",["Init Section Here"])]) ]
-                for line in self.rawText:
-                    if not _PattSec.match(line):
-                        self.BookTree[-1][1][-1][1].append(line)
-                    elif ( (_SectionCount % SectMax) == 0) and (_SectionCount != 0):
-                        _SectionCount = _SectionCount+1
-                        self.BookTree.append((f"Chapter>>{_SectionCount:06d}~{_SectionCount+SectMax:06d}<<",
-                                              [(line,[])]))
-                    else:
-                        _SectionCount = _SectionCount +1
-                        self.BookTree[-1][1].append((line,[]))
-                    continue
-            case "ls":
-                self.BookTree = []
-                _PatLS:list[re.Pattern] = self.ChapterBy[1]
-                _INITB = True
-                _INITC = True
-                for line in self.rawText:
-                    if _INITB:
-                        if _PatLS[0].match(line):
-                            self.BookTree.append((line,[]))
-                            _PatLS.pop(0)
-                            _INITB = False
-                        else:
-                            continue
-                    else:
-                        if _PatLS!=[]:
-                            if _PatLS[0].match(line):
-                                self.BookTree.append((line,[]))
-                                _PatLS.pop(0)
-                                _INITC = True
-                        if _INITC:
-                            if _PattSec.match(line): # match Section
-                                self.BookTree[-1][1].append((line,[]))
-                                _INITC = False
-                            else:
-                                continue
-                        else:
-                            if _PattSec.match(line): # match Section
-                                self.BookTree[-1][1].append((line,[]))
-                            else:
-                                self.BookTree[-1][1][-1][1].append(line)
-            case "re":
-                self.BookTree = []
-                _PatChap : re.Pattern = self.ChapterBy[1]
-                _INITB = True
-                _INITC = True
-                for line in self.rawText:
-                    if _INITB:
-                        if _PatChap.match(line): # match Chapter
-                            self.BookTree.append((line,[]))
-                            _INITB = False
-                        else:
-                            continue
-                    else:
-                        if _PatChap.match(line):
-                            self.BookTree.append((line,[]))
-                            _INITC = True
-                        if _INITC:
-                            if _PattSec.match(line): # match Section
-                                self.BookTree[-1][1].append((line,[]))
-                                _INITC = False
-                            else:
-                                continue
-                        else:
-                            if _PattSec.match(line): # match Section
-                                self.BookTree[-1][1].append((line,[]))
-                            else:
-                                self.BookTree[-1][1][-1][1].append(line)
-            case _:
-                return False
-        return True
-    def regBook(self,name:str,author:str,brief:str="Default Brief",uid:bytearray=None)->None:
-        self.c_Data = (name,author,brief.replace("\n",'\\n'))
-        bk = epub.EpubBook()
-        bk.set_language('zh')
-        bk.set_title(name)
-        bk.set_identifier(str(uid if uid is not None else uuid.uuid1()))
-        bk.add_author(author)
-        bk.add_metadata("DC", "description", brief )
-        if self.style.use_ttf():
-            ttf,fb = self.style.get_ttf()
-            bk.add_item(epub.EpubItem("FONT001.font",ttf,"font/ttf",fb))
-        bk.add_item(epub.EpubItem("style.css","style.css","text/css",self.style.get_css()))
-        spine_tmp = ["nav"]
-        SectionCount = sum([ len(ils[1])  for ils in self.BookTree ])
-        with trange(1,SectionCount+1) as TBAR:
-            UT = iter(TBAR)
-            SectionBuild:list[list[epub.EpubHtml]] = []
-            ChapterBuild:list[tuple[epub.Link,list[epub.EpubHtml]]] = []
-            for cid,(ChapterName, innerLS) in enumerate(self.BookTree,1):
-
-                SectionBuild.append([])
-                for sid,(SectionName, PageLsStr) in enumerate(innerLS,1):
-                    TBAR.set_description_str(f"C{cid:03d}S{sid:06d}")
-                    _pagenow = WorkSpace.GenEpubPage(
-                        cid,sid,next(UT),SectionName,PageLsStr
+        return self
+    def Finally(self,SyncDir:str=None):
+        BacDir = self.Config.cache
+        SycDir = self.Config.sync | SyncDir
+        Window = self.Window
+        Window.clear()
+        Window.RegObj("[red] All works has done.",
+                    f"[green]Books{self.books}try to backup or sync.",
+                    f"[green]target Sync Dir is {SycDir}",
+                    f"[green]target Backup Dir is {BacDir}",
                     )
-                    bk.add_item(_pagenow)
-                    spine_tmp.append(_pagenow)
-                    SectionBuild[-1].append(_pagenow)
-                ChapterBuild.append((epub.Link("javascript:void(0)",ChapterName,f"Chap{cid:03d}"),SectionBuild[-1],))
-            
-        print(f"Total Chap{cid:03d}, SecPage{SectionCount:06d}")
-
-        bk.toc = ChapterBuild
-        bk.add_item(epub.EpubNcx())
-        bk.add_item(epub.EpubNav())
-        bk.spine = spine_tmp
-        self.bk = bk
-    def SaveBook(self,path:str)-> None:
-        epub.write_epub(path,self.bk)
-    def AUTO(self,path:str,__inner_style:bool):
-        os.system("cls")
-        print(f"AUTO RUNNING:{path}")
-        self.style = main.style(path,__inner_style,True)
-        with open(path,'r',encoding='utf-8') as f:
-            a = f.readline().strip()
-            if a == ":: BeetSoup doc Rev 1":
-                ChapBy = f.readline().strip()
-                SectBy = f.readline().strip()
-                name   = f.readline().strip()
-                ah     = f.readline().strip()
-                brief  = f.readline().replace("\\n",'\n')
-                self.rawText = f.readlines()
-        if len(self.rawText)!= 0:
-            print('\n'.join([ChapBy,SectBy,name,ah,brief]))
-            if self.openText(path):
-                if self.regChapterBy(ChapBy) :
-                    if self.regSectionBy(SectBy):
-                        self.regBook(name,ah,brief)
-                        self.SaveBook(path.rsplit('.')[0]+".ePub")
-                        return
-        raise Exception("SomeError!")
-
-    def CLI(self,path:str):
-        os.system("cls")
-        print(">>>       YOU ARE RUNNING oneBook NOW       <<<\n\n")
-        print(f" Opening file in `{path               :^25}`.     ")
-        if self.openText(path):
-            os.system("cls")
-            print(">>>       YOU ARE RUNNING oneBook NOW       <<<\n\n")
-            print(f" Find File `{path               :^25}`,...Done.")
-        else:
-            print(f" unable to open file{path}!!!")
-            return
-        _NOK = True
-        _NP3 = subprocess.Popen(f"notepad.exe \"./{path}\"")
-        while(_NOK):
-            os.system("cls")
-            print(">>>       YOU ARE RUNNING oneBook NOW       <<<\n\n\n",
-                 f" Find File `{path               :^25}`,...Done.")
-            while input(">Update File?\nYes/[N]o > ").strip() not in ['','n','N','no','NO']:
-                self.openText(path)
-                os.system("cls")
-                print(">>>       YOU ARE RUNNING oneBook NOW       <<<\n\n\n")
-            os.system("cls")
-            print(">>>       YOU ARE RUNNING oneBook NOW       <<<\n\n\n",
-                 f" Find File `{path               :^25}`,...Done.\n",
-                  " Confirm the text file,...                Done.")
-            while not self.regChapterBy( input(">Group By your Section, \n{}\n".format('\n'.join([":: "+str(_[0]) + " is `{}`".format(_[1]) for _ in zip(range(len(self.quickCB)),self.quickCB) ]))).strip()):
-                print("Parmer ERROR, please re input")
-            os.system("cls")
-            print(">>>       YOU ARE RUNNING oneBook NOW       <<<\n\n\n",
-                 f" Find File `{path               :^25}`,...Done.\n",
-                  " Confirm the text file,...                Done.\n",
-                  " Set `GroupBy`,...                        Done.")
-            while not self.regSectionBy( input(">Set your Section, \n{}\n".format('\n'.join([ ":: "+str(_[0])+ " is `{}`".format(_[1]) for _ in zip(range(len(self.quickSB)),self.quickSB) ]))).strip()):
-                print("Parmer ERROR, please re input")
-            os.system("cls")
-            print(">>>       YOU ARE RUNNING oneBook NOW       <<<\n\n\n",
-                 f" Find File `{path               :^25}`,...Done.\n",
-                  " Confirm the text file,...                Done.\n",
-                  " Set `GroupBy`,...                        Done.\n",
-                  " Set `regSection`,...                     Done.")
-            n = input(">Name   Here").strip()
-            a = input(">Author Here").strip()
-            b = input(">Brief  Here").strip()
-            print("All is done, Now Working!!!")
-            self.regBook(path[:-4]if '' == n else n,a,"Default Brief Here" if not b else b)
-            print("Now Saving!")
-            self.SaveBook(path.rsplit('.')[0]+".ePub")
-            a = input("OK?[Y]es/No").strip().lower()
-            if a in "yes":
-                _NOK = False
-        _NP3.kill()
-        return
+        Window.Display()
+        if input(" >>> press [y]/n to continue this work").lower() in "yes":
+            if SycDir is not None:
+                for p in self.books:
+                    Utils.SycUp(p,SycDir)
+            for p in self.books:
+                Utils.BacUp(p,BacDir)
+        Window.Display.Tmp("[red] wait 3s to exit")
+        time.sleep(3)
 
 if __name__ =='__main__':
-    main()
+    main = MainProcess()
+    main.run().Finally("C:/Users/BeetSoup/OneDrive/!Novel")
