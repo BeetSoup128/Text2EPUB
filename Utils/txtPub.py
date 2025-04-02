@@ -261,6 +261,7 @@ class WorkProcess:
         if self.font_tasK is not None:
             self.font_tasK.start()
         if self.listStr[0].strip() == ":: BeetSoup doc Rev 1":
+            self.ConsoleUI.Display.Tmp("[blue] Auto doc file format rev 1 found")
             self.listStr.pop(0)
             ChapBy = self.listStr.pop(0).strip()
             SectBy = self.listStr.pop(0).strip()
@@ -269,6 +270,7 @@ class WorkProcess:
             BrifBK = self.listStr.pop(0).strip()
             MarkBK = [SectBy,ChapBy]
         elif self.listStr[0].strip() == ":: PubDoc rev 2":
+            self.ConsoleUI.Display.Tmp("[blue] Auto doc file format rev 2 found")
             self.listStr.pop(0)
             KeyTag = self.listStr.pop(0).strip()
             if KeyTag.startswith("<Book-Infos.data="):
@@ -297,7 +299,7 @@ class WorkProcess:
         self.strFilePath = Utils.bookPath(textfp,self.cfg.targ)
         self.listStr = Utils.loadu8f(self.strFilePath)
         self.listMatchedLines:list[list[int]] = []
-        self.ConsoleUI.RegObj(f"[blue]Now Working with `{textfp}`.")
+        self.ConsoleUI.RegObj(f"[red]=Now Working with `{textfp}`=")
         self.list_marker = []
         self.list_book_data :list[str] = []
         self.tasQ = multiprocessing.Queue(1)
@@ -371,25 +373,9 @@ class WorkProcess:
         self.book.set_unique_metadata('DC',"publisher",__Project_Name__+" Build")
         self.book.spine = Spine
     def save_book(self)-> None:
-        self.ConsoleUI.clear()
-        Writer = epub.EpubWriter(self.strFilePath[:-4]+".ePub", self.book)
-        Writer.process()
-        Writer.out = zipfile.ZipFile(Writer.file_name,'w',zipfile.ZIP_DEFLATED,compresslevel=9)
-        Writer.out.writestr('mimetype', 'application/epub+zip', compress_type=zipfile.ZIP_STORED)
-        Writer._write_container()
-        Writer._write_opf()
-        for itm in self.book.get_items():
-            if isinstance(itm, epub.EpubNcx):
-                itemdata = Writer._get_ncx()
-                Writer.out.writestr('%s/%s' % (self.book.FOLDER_NAME, itm.file_name), itemdata  )
-            elif isinstance(itm, epub.EpubNav):
-                Writer.out.writestr('%s/%s' % (self.book.FOLDER_NAME, itm.file_name), Writer._get_nav(itm))
-            elif isinstance(itm, epub.EpubItem):
-                if itm.manifest:
-                    Writer.out.writestr('%s/%s' % (self.book.FOLDER_NAME, itm.file_name), itm.get_content())
-                else:
-                    Writer.out.writestr('%s' % itm.file_name, itm.get_content())
-        Writer.out.close()
+        self.ConsoleUI.RegObj("[blue] Now Saving the Book.")
+        self.ConsoleUI.Display()
+        return epub.write_epub(self.strFilePath.replace(".txt",'.ePub',1),self.book)
     def WithTUI(self):
         self.ConsoleUI.RegObj("[blue]Using Terminal to build this book to EPUB.")
         with subprocess.Popen(f"notepad4 {self.strFilePath}") as p:
@@ -428,11 +414,11 @@ class WorkProcess:
         self.ConsoleUI.Display()
         for m in markers:
             self.mark(m)
-        self.ConsoleUI.RegObj(f"[green]{name}:{author}","[green]"+brief)
+        self.ConsoleUI.RegObj(f"[green]<{name}>:<{author}>","[green]<<<"+brief+">>>")
         self.ConsoleUI.Display()
         self.book.add_author(author)
         self.book.set_title(title=name)
-        self.book.add_metadata('DC', "description", brief )
+        self.book.add_metadata('DC', "description", brief.replace('\n','<br/>'))
         self.book.set_identifier(str(uuid1()))
         self.build_book()
         if self.font_tasK is not None:
@@ -496,13 +482,13 @@ class MainProcess:
         SycDir = self.Config.sync or SyncDir
         Window = self.Window
         Window.clear()
-        Window.RegObj("[red] All works has done.",
-                    f"[green]Books{self.books}try to backup or sync.",
-                    f"[green]target Sync Dir is {SycDir}",
-                    f"[green]target Backup Dir is {BacDir}",
+        Window.RegObj("[red] =All works has done=",
+                    f"[blue]Books[green]{self.books}[blue]try to backup or sync.",
+                    f"[blue]target SyncForder is>[green]{SycDir}",
+                    f"[blue]target Backup Dir is>[green]{BacDir}",
                     )
         Window.Display()
-        if Window.input(" >>> press [y]/n to continue this work").strip().lower() in "yes":
+        if Window.input("[white]press [green]y[white]/n to continue this work\n[green]>>>").strip().lower() in "yes":
             if SycDir != '':
                 for p in self.books:
                     Utils.SycUp(p,SycDir)
