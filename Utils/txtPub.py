@@ -1,4 +1,4 @@
-import os,typing,subprocess,re,io,zipfile,multiprocessing,pickle,base64,shutil,time
+import os,typing,subprocess,re,io,zipfile,multiprocessing,pickle,base64,shutil,time,signal
 
 from fontTools import subset,ttLib
 from ebooklib import epub
@@ -7,12 +7,14 @@ from weakref import ref
 from rich.console import Console as RConsole
 from uuid import uuid1
 
+__Project_Name__ = """BeetSoup128/PyS_txt2epub3"""
+
 class Utils:
     class Cfg(typing.NamedTuple):
         targ:str = "."
         cache:str= "./!!!Backups"
         utils:str= "./Utils"
-        sync:str|None=None
+        sync:str = ""
     class TUI:
         class __Display:
             def __init__(self,rTUI:ref):
@@ -42,6 +44,8 @@ class Utils:
             self.RegdObjects.extend([o for o in obj])
         def clear(self):
             self.RegdObjects.clear()
+        def input(self,prompt:str)->str:
+            return self.c.input(prompt)
     class QuickMarker:
         def __init__(self,LevelName:str,QuickChoices:list[str]=None):
             self.LVn = LevelName
@@ -98,10 +102,12 @@ class Utils:
         return target
     @staticmethod
     def GenFonttoQ(strLS:list[str],Q:multiprocessing.Queue):
+        signal.signal(signal.SIG_IGN,signal.SIG_IGN)
+        set_text = { u for k in strLS for u in k}
         fb = io.BytesIO(Q.get())
         ft = ttLib.TTFont(fb)
         sr = subset.Subsetter()
-        sr.populate(text=''.join(strLS))
+        sr.populate(text=''.join(set_text))
         sr.subset(ft)
         ft.flavor = "woff2"
         _qio = io.BytesIO()
@@ -229,14 +235,21 @@ class Utils:
     def BacUp(name:str,Backup:str) -> None:
         try:
             os.remove(f"{Backup}/{name}.ePub")
+        except:
+            pass
+        try:
             os.remove(f"{Backup}/{name}.txt")
         except:
             pass
         shutil.move(f"{name}.txt",Backup)
         shutil.move(f"{name}.ePub",Backup)
+    @staticmethod
     def SycUp(name:str,Syncup:str) -> None:
         try:
             os.remove(f"{Syncup}/{name}.ePub")
+        except:
+            pass
+        try:
             shutil.copy(f"{name}.ePub",Syncup)
         except:
             pass
@@ -274,7 +287,7 @@ class WorkProcess:
             self.WithTUI()
             if SavRev is not None:
                 self.listStr.pop(0)
-                self.reWrite(SavRev,*self.list_book_data)
+                self.reWrite(SavRev,self.list_marker,*self.list_book_data)
     def __init__(self,textfp:str,**args):
         self.cfg = Utils.Check(args,'cfg',Utils.Cfg())
         self.HintMarker = Utils.Check(args,"Marker",Utils.QuickMarker.All())
@@ -286,7 +299,7 @@ class WorkProcess:
         self.listMatchedLines:list[list[int]] = []
         self.ConsoleUI.RegObj(f"[blue]Now Working with `{textfp}`.")
         self.list_marker = []
-        self.list_book_data :list[str]
+        self.list_book_data :list[str] = []
         self.tasQ = multiprocessing.Queue(1)
         self.lsdictMarkerName:list[dict|None] = []
         __TTFtarg = [Utils.bookPath(p,self.cfg.utils) for p in os.listdir(self.cfg.utils) if p.endswith(".ttf")]
@@ -296,7 +309,8 @@ class WorkProcess:
         else:
             with open(__TTFtarg[0],'rb') as g:
                 self.tasQ.put(g.read())
-            self.font_tasK = multiprocessing.Process(target=Utils.GenFonttoQ,args=(self.listStr,self.tasQ))
+            __ctx = multiprocessing.get_context()
+            self.font_tasK = __ctx.Process(target=Utils.GenFonttoQ,args=(self.listStr,self.tasQ), daemon=False)
     def __CountBy(self,count:slice | int,level:int=0) -> None:
         self.listMatchedLines.insert(0, self.listMatchedLines[level][count] if isinstance(count,slice) else self.listMatchedLines[level][::count])
         step:int = count.step if isinstance(count,slice) else count
@@ -304,13 +318,22 @@ class WorkProcess:
     def __REBy(self,reP:re.Pattern) -> None:
         self.listMatchedLines.insert(0, [idx  for idx,words in enumerate(self.listStr) if re.match(reP,words)])
         self.lsdictMarkerName.insert(0,None)
-    def mark(self,Auto:str|None)-> None:
+    def mark(self,Auto:str|None=None)-> None:
         self.ConsoleUI.Display()
         if Auto is None:
-            __prompt = f"Now try to mark{self.HintMarker[len(self.listMatchedLines)].LVn}" if len(self.HintMarker) < len(self.listMatchedLines) else f"Now try to mark ::level{len(self.listMatchedLines)}"
-            self.ConsoleUI.Display.Tmp("type \\d for Quick chioce(optional),!Count\\d+[:\\d+:\\d+] to match CountBy, and any to match RegExp.",__prompt,
-                *[ f"Quick::{idx:03d}>>`{k}`" for idx,k in enumerate(self.HintMarker[len(self.listMatchedLines)].choices)] )
-            rep = input(" >>> ").strip()
+            self.ConsoleUI.Display.Tmp(
+                "type \\d for Quick chioce(optional),!Count\\d+[:\\d+:\\d+] to match CountBy, and any to match RegExp.",
+                f"Now try to mark{self.HintMarker[len(self.listMatchedLines)].LVn}" if len(self.HintMarker) < len(self.listMatchedLines) else f"Now try to mark ::level{len(self.listMatchedLines)}")
+            if len(self.listMatchedLines) < len(self.HintMarker):
+                Hints = self.HintMarker[len(self.listMatchedLines)]
+                self.ConsoleUI.Display.Tmp(*[f"  Quick::{idx:03d}>>`{k}`"for idx,k in enumerate(Hints.choices)])
+                rep = self.ConsoleUI.input(" >>> ").strip()
+                if not rep:
+                    return self.mark(Hints.choices[0])
+                if re.match("^\\d+$",rep) and int(rep) < len(Hints.choices) :
+                    return self.mark(Hints.choices[int(rep)])
+            else:
+                rep = self.ConsoleUI.input(" >>> ").strip()
         else:
             rep = Auto
         if re.match("^!Count\\d+:\\d+:\\d+$",rep):
@@ -341,6 +364,11 @@ class WorkProcess:
             self.book.toc = ToC[1]
         self.book.add_item(epub.EpubNcx())
         self.book.add_item(epub.EpubNav())
+        self.book.set_language("zh-cn")
+        self.book.set_unique_metadata("dc","date",time.strftime("%Y-%m-%d", time.localtime()))
+        self.book.set_unique_metadata('OPF', 'generator', '', {
+            'name': 'generator', 'content':__Project_Name__})
+        self.book.set_unique_metadata("dc","publisher",__Project_Name__+" Build")
         self.book.spine = Spine
     def save_book(self)-> None:
         self.ConsoleUI.clear()
@@ -364,23 +392,23 @@ class WorkProcess:
         Writer.out.close()
     def WithTUI(self):
         self.ConsoleUI.RegObj("[blue]Using Terminal to build this book to EPUB.")
-        self.book.set_language('zh')
-        with subprocess.Popen(f"notepad4 \"./{self.strFilePath}\"") as p:
+        with subprocess.Popen(f"notepad4 {self.strFilePath}") as p:
             Marking = True
             while(Marking):
                 try:
                     self.mark()
-                except KeyboardInterrupt:
+                except KeyboardInterrupt as _:
                     Marking = False
+                except BaseException as b:
+                    raise Exception(b)
                 finally:
                     continue
             self.ConsoleUI.Display()
             self.ConsoleUI.Display.Tmp("Now mark the book infomation")
-            self.list_book_data[0] = input(f"书名::>{self.strFileName}")
-            if self.list_book_data[0].isspace():
-                self.list_book_data[0] = self.strFileName.strip()
-            self.list_book_data[1] = input("作者::>").strip()
-            self.list_book_data[2] = input("简介::>").strip()
+            BKname = self.strFileName.replace(".txt",'',1)
+            self.list_book_data.append(self.ConsoleUI.input(f"书名::>{BKname}").strip() or BKname)
+            self.list_book_data.append(self.ConsoleUI.input("作者::>").strip())
+            self.list_book_data.append(self.ConsoleUI.input("简介::>").strip())
             self.ConsoleUI.RegObj(f"[green]{self.list_book_data[0]}:{self.list_book_data[1]}","[green]"+self.list_book_data[2])
             self.ConsoleUI.Display()
             self.book.set_title(self.list_book_data[0])
@@ -398,14 +426,13 @@ class WorkProcess:
     def Auto(self,markers:list[str],name:str,author:str,brief:str):
         self.ConsoleUI.RegObj("[blue]Auto building this book to EPUB.")
         self.ConsoleUI.Display()
-        self.book.set_language('zh')
         for m in markers:
             self.mark(m)
         self.ConsoleUI.RegObj(f"[green]{name}:{author}","[green]"+brief)
         self.ConsoleUI.Display()
         self.book.add_author(author)
         self.book.set_title(title=name)
-        self.book.add_metadata("DC", "description", brief )
+        self.book.add_metadata("dc", "description", brief )
         self.book.set_identifier(str(uuid1()))
         self.build_book()
         if self.font_tasK is not None:
@@ -427,7 +454,7 @@ class WorkProcess:
                 data_b64_pickle = base64.b64encode(pickle.dumps((markers,name,author,brief)))
                 f.write(f"<Book-Infos.data={data_b64_pickle}/>\n\n")
                 f.writelines(self.listStr)
-EZMaker = [
+EZMarker = [
         Utils.QuickMarker("简单快速分章节",
             ["^(:?番外|终章|序章|第[零一两二三四五六七八九十百千万0123456789 ]+章)",
                 "^===.*===",
@@ -438,7 +465,7 @@ EZMaker = [
                 "^第[零一两二三四五六七八九十百千万0123456789 ]+卷"])
     ]
 class MainProcess:
-    def __init__(self,cfg=None,checks=(".txt"),ignores = ("!")):
+    def __init__(self,cfg:Utils.Cfg|None=None,checks=(".txt"),ignores = ("!")):
         self.Window = Utils.TUI()
         self.Config = cfg if cfg is not None else Utils.Cfg()
         a = [p for p in os.listdir(self.Config.targ) if p.endswith(checks) and not p.startswith(ignores)]
@@ -449,24 +476,24 @@ class MainProcess:
                 tmp = tmp.replace(j,'')
             b.append(tmp)
         self.books:list[str] = b
-    def run(self,somebook:str=None,rev:int=2):
+    def run(self,marker:list[Utils.QuickMarker],somebook:str=None,rev:int=2):
         for n in self.books:
             if f"{n}.ePub" not in os.listdir(self.Config.targ):
                 WorkProcess(f"{n}.txt",conf = self.Config,
                     UI = self.Window,
-                    Marker = EZMaker ).run(SavRev=rev)
+                    Marker = marker ).run(SavRev=rev)
         if somebook is not None:
             try:
                 WorkProcess(somebook,conf = self.Config,
                     UI = self.Window,
-                    Marker = EZMaker).run(SavRev=rev)
+                    Marker = marker).run(SavRev=rev)
                 self.books.append[somebook[:-4]]
             except:
                 pass
         return self
-    def Finally(self,SyncDir:str=None):
+    def Finally(self,SyncDir:str=''):
         BacDir = self.Config.cache
-        SycDir = self.Config.sync | SyncDir
+        SycDir = self.Config.sync or SyncDir
         Window = self.Window
         Window.clear()
         Window.RegObj("[red] All works has done.",
@@ -475,8 +502,8 @@ class MainProcess:
                     f"[green]target Backup Dir is {BacDir}",
                     )
         Window.Display()
-        if input(" >>> press [y]/n to continue this work").lower() in "yes":
-            if SycDir is not None:
+        if Window.input(" >>> press [y]/n to continue this work").strip().lower() in "yes":
+            if SycDir != '':
                 for p in self.books:
                     Utils.SycUp(p,SycDir)
             for p in self.books:
@@ -486,4 +513,4 @@ class MainProcess:
 
 if __name__ =='__main__':
     main = MainProcess()
-    main.run().Finally("C:/Users/BeetSoup/OneDrive/!Novel")
+    main.run(EZMarker).Finally("C:/Users/BeetSoup/OneDrive/!Novel")
