@@ -37,7 +37,7 @@ class Utils:
                 for o in objs:
                     self.__TUI.c.print(o)
         def __init__(self):
-            self.c = RConsole(markup=False)
+            self.c = RConsole(markup=True)
             self.RegdObjects:list = []
             self.Display = self.__Display(ref(self))
         def RegObj(self, *obj) -> None:
