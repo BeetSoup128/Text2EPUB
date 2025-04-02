@@ -4,7 +4,7 @@
 !!!Backups
 Utils/check_chapterID.py
 Utils/installer.py
-Utils/LXGWWenKaiGB-Medium.ttf
+Utils/*.ttf
 Utils/style.css
 Utils/txtPub_old.py
 Utils/test.py
