@@ -1,0 +1,17 @@
+[project]
+name = "textpub"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "beautifulsoup4>=4.13.3",
+    "brotli>=1.1.0",
+    "ebooklib>=0.18",
+    "fonttools>=4.56.0",
+    "pyyaml>=6.0.2",
+    "rich>=13.9.4",
+    "tqdm>=4.67.1",
+    "urllib3>=2.3.0",
+    "zhconv>=1.4.3",
+]
