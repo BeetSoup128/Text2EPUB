@@ -218,7 +218,7 @@ class Utils:
         def build_toc(node) -> tuple[epub.Link, list] | epub.EpubHtml | None:
             children = node['children']
             if children:
-                return [epub.Link("####",Utils.FmtStrXhtmlH(node['title']),f"U{node['id']}"),
+                return [epub.Link("####",node['title'],f"U{node['id']}"),
                     [c for c in [build_toc(child) for child in children] if c is not None]]
             else: # 处理内容可能为空的情况
                 content_lines = []
@@ -365,10 +365,10 @@ class WorkProcess:
         self.book.add_item(epub.EpubNcx())
         self.book.add_item(epub.EpubNav())
         self.book.set_language("zh-cn")
-        self.book.set_unique_metadata("dc","date",time.strftime("%Y-%m-%d", time.localtime()))
+        self.book.set_unique_metadata('DC',"date",time.strftime("%Y-%m-%d", time.localtime()))
         self.book.set_unique_metadata('OPF', 'generator', '', {
             'name': 'generator', 'content':__Project_Name__})
-        self.book.set_unique_metadata("dc","publisher",__Project_Name__+" Build")
+        self.book.set_unique_metadata('DC',"publisher",__Project_Name__+" Build")
         self.book.spine = Spine
     def save_book(self)-> None:
         self.ConsoleUI.clear()
@@ -413,7 +413,7 @@ class WorkProcess:
             self.ConsoleUI.Display()
             self.book.set_title(self.list_book_data[0])
             self.book.add_author(self.list_book_data[1])
-            self.book.add_metadata("DC", "description", self.list_book_data[2].replace("\\n",'\n') )
+            self.book.add_metadata('DC', "description", self.list_book_data[2].replace("\\n",'\n') )
             self.book.set_identifier(str(uuid1()))
             p.kill()
         if self.font_tasK is not None:
@@ -432,7 +432,7 @@ class WorkProcess:
         self.ConsoleUI.Display()
         self.book.add_author(author)
         self.book.set_title(title=name)
-        self.book.add_metadata("dc", "description", brief )
+        self.book.add_metadata('DC', "description", brief )
         self.book.set_identifier(str(uuid1()))
         self.build_book()
         if self.font_tasK is not None:
