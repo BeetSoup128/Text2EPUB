@@ -1,4 +1,4 @@
-import os,typing,subprocess,re,io,zipfile,multiprocessing,pickle,base64,shutil,time,signal
+import os,typing,subprocess,re,io,multiprocessing,pickle,base64,shutil,time,signal
 
 from fontTools import subset,ttLib
 from ebooklib import epub
@@ -294,6 +294,7 @@ class WorkProcess:
         self.cfg = Utils.Check(args,'cfg',Utils.Cfg())
         self.HintMarker = Utils.Check(args,"Marker",Utils.QuickMarker.All())
         self.ConsoleUI = Utils.Check(args,"UI",Utils.TUI())
+        self.ConsoleUI.clear()
         self.book = epub.EpubBook()
         self.strFileName = textfp
         self.strFilePath = Utils.bookPath(textfp,self.cfg.targ)
@@ -442,13 +443,13 @@ class WorkProcess:
                 f.writelines(self.listStr)
 EZMarker = [
         Utils.QuickMarker("简单快速分章节",
-            ["^(:?番外|终章|序章|第[零一两二三四五六七八九十百千万0123456789 ]+章)",
+            ["^(:?番外|终章|序章|第[〇零一两二三四五六七八九十百千万0123456789 ]+章)",
                 "^===.*===",
                 "^Chap\\d+"]),
         Utils.QuickMarker("简单快速分卷",
             ["!Count100",
                 "^VOL::.*",
-                "^第[零一两二三四五六七八九十百千万0123456789 ]+卷"])
+                "^第[〇零一两二三四五六七八九十百千万0123456789 ]+卷"])
     ]
 class MainProcess:
     def __init__(self,cfg:Utils.Cfg|None=None,checks=(".txt"),ignores = ("!")):
