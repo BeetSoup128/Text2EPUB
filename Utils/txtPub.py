@@ -202,7 +202,7 @@ class Utils:
             new_node = {
                 'id': current_id,
                 'level': current_level,
-                'title': cls.FmtStrXhtmlH(data[current_id]) if namemap[current_level] is None else namemap[current_level][current_id] ,
+                'title': cls.FmtStrXhtml(data[current_id]) if namemap[current_level] is None else namemap[current_level][current_id] ,
                 'content_start': content_start,
                 'content_end': content_end,
                 'children': []

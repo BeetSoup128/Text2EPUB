@@ -2,7 +2,6 @@
 *.txt
 .gitignore
 !!!Backups
-Utils/check_chapterID.py
 Utils/installer.py
 Utils/*.ttf
 Utils/style.css
